@@ -405,7 +405,7 @@ class TestDashboard:
         assert len(data["picks"]) == 2
         # Should be sorted by score desc (from get_latest_predictions)
         assert data["picks"][0]["stock_id"] == "2330.TW"
-        assert data["picks"][0]["score"] == 0.85
+        assert data["picks"][0]["composite_score"] == 0.85
 
     def test_top_picks_no_db(self, client_no_db):
         resp = client_no_db.get("/api/dashboard/top-picks")

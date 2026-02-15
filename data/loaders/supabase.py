@@ -6,7 +6,6 @@ predictions, and backtest results stored in Supabase (PostgreSQL).
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import date
 from typing import Optional

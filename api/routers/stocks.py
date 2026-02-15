@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.dependencies import get_db
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
@@ -68,13 +68,29 @@ class PredictionResponse(BaseModel):
     message: Optional[str] = None
 
 
+class StockScoreResponse(BaseModel):
+    stock_id: str
+    composite_score: Optional[float] = None
+    momentum_score: Optional[float] = None
+    trend_score: Optional[float] = None
+    volatility_score: Optional[float] = None
+    volume_score: Optional[float] = None
+    ai_score: Optional[float] = None
+    risk_level: Optional[str] = None
+    max_drawdown: Optional[float] = None
+    volatility_ann: Optional[float] = None
+    win_rate: Optional[float] = None
+    date: Optional[str] = None
+    message: Optional[str] = None
+
+
 # ------------------------------------------------------------------ #
 #  Endpoints
 # ------------------------------------------------------------------ #
 
 @router.get("", response_model=StockListResponse)
-def list_stocks(db: Optional[SupabaseLoader] = Depends(get_db)) -> StockListResponse:
-    """List all stocks in the universe."""
+def list_stocks(db: Optional[DatabaseLoader] = Depends(get_db)) -> StockListResponse:
+    """List all stocks in the universe with optional score info."""
     if db is None:
         return StockListResponse(stocks=[], message="Supabase not configured")
 
@@ -85,7 +101,19 @@ def list_stocks(db: Optional[SupabaseLoader] = Depends(get_db)) -> StockListResp
             .execute()
         )
         unique_ids = sorted({r["stock_id"] for r in resp.data})
-        stocks = [StockItem(stock_id=sid) for sid in unique_ids]
+
+        # Try to enrich with universe names
+        name_map: dict[str, str] = {}
+        try:
+            uni_resp = db.client.table("stock_universe").select("stock_id,stock_name").execute()
+            name_map = {r["stock_id"]: r["stock_name"] for r in uni_resp.data if r.get("stock_name")}
+        except Exception:
+            pass
+
+        stocks = [
+            StockItem(stock_id=sid, name=name_map.get(sid))
+            for sid in unique_ids
+        ]
         return StockListResponse(stocks=stocks)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -96,7 +124,7 @@ def get_prices(
     stock_id: str,
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> PriceResponse:
     """Get price history for a stock."""
     if db is None:
@@ -123,7 +151,7 @@ def get_features(
     stock_id: str,
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> FeatureResponse:
     """Get computed features for a stock."""
     if db is None:
@@ -151,7 +179,7 @@ def get_features(
 @router.get("/{stock_id}/predictions", response_model=PredictionResponse)
 def get_predictions(
     stock_id: str,
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> PredictionResponse:
     """Get latest predictions for a stock."""
     if db is None:
@@ -169,5 +197,40 @@ def get_predictions(
             PredictionRecord(**{**r, "date": str(r["date"])[:10]}) for r in records
         ]
         return PredictionResponse(predictions=preds)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/{stock_id}/score", response_model=StockScoreResponse)
+def get_stock_score(
+    stock_id: str,
+    db: Optional[DatabaseLoader] = Depends(get_db),
+) -> StockScoreResponse:
+    """Get a stock's latest composite score and factor breakdown."""
+    if db is None:
+        return StockScoreResponse(stock_id=stock_id, message="Database not configured")
+
+    try:
+        if not hasattr(db, "get_stock_score"):
+            return StockScoreResponse(stock_id=stock_id, message="Scoring not available")
+
+        score = db.get_stock_score(stock_id)
+        if score is None:
+            return StockScoreResponse(stock_id=stock_id, message="No score data found")
+
+        return StockScoreResponse(
+            stock_id=stock_id,
+            composite_score=score.get("composite_score"),
+            momentum_score=score.get("momentum_score"),
+            trend_score=score.get("trend_score"),
+            volatility_score=score.get("volatility_score"),
+            volume_score=score.get("volume_score"),
+            ai_score=score.get("ai_score"),
+            risk_level=score.get("risk_level"),
+            max_drawdown=score.get("max_drawdown"),
+            volatility_ann=score.get("volatility_ann"),
+            win_rate=score.get("win_rate"),
+            date=str(score.get("date", ""))[:10],
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

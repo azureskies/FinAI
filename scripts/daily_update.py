@@ -14,14 +14,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from datetime import date, timedelta
 
 import pandas as pd
-import yaml
 from loguru import logger
 
 from data.collectors.price import PriceCollector
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 from data.processors.features import FeatureEngine
 
 _CONFIG_PATH = "configs/data_sources.yaml"
@@ -59,19 +59,40 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Disable alert notifications",
     )
+    parser.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help="Force full data refresh instead of incremental",
+    )
     return parser.parse_args()
 
 
 def _load_universe(stock_id: str | None) -> list[str]:
-    """Load stock universe from config or use single stock."""
+    """Load stock universe from UniverseCollector or use single stock."""
     if stock_id:
         return [stock_id]
 
-    with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+    try:
+        from data.collectors.universe import UniverseCollector
+        collector = UniverseCollector()
+        universe_df = collector.get_universe(date.today())
+        if not universe_df.empty and "stock_id" in universe_df.columns:
+            stock_ids = universe_df["stock_id"].tolist()
+            logger.info("Loaded {} stocks from UniverseCollector", len(stock_ids))
 
-    # Try to load from Supabase universe table or fallback to a default list
-    # For now, use a representative set of large-cap TW stocks
+            # Save universe to DB
+            db = DatabaseLoader()
+            if hasattr(db, "init_schema"):
+                db.init_schema()
+            if hasattr(db, "upsert_universe"):
+                db.upsert_universe(universe_df)
+            db.close()
+
+            return stock_ids
+    except Exception as e:
+        logger.warning("Failed to fetch universe from API: {}", e)
+
+    # Fallback to default list
     default_universe = [
         "2330", "2317", "2454", "2308", "2881",
         "2882", "2891", "2303", "1301", "1303",
@@ -93,7 +114,12 @@ def main() -> None:
     # Initialize components
     collector = PriceCollector()
     feature_engine = FeatureEngine()
-    db = None if args.dry_run else SupabaseLoader()
+    if args.dry_run:
+        db = None
+    else:
+        db = DatabaseLoader()
+        if hasattr(db, "init_schema"):
+            db.init_schema()
 
     # Pipeline tracking and alerting
     tracker = None
@@ -115,10 +141,33 @@ def main() -> None:
 
     try:
         # -------------------------------------------------------------- #
-        # 1. Fetch latest price data
+        # 1. Fetch latest price data (incremental or full)
         # -------------------------------------------------------------- #
         logger.info("Step 1: Fetching price data...")
-        price_data = collector.fetch_batch(stock_ids, start_date, target_date)
+        if args.full_refresh or db is None:
+            logger.info("Full refresh mode — fetching all data")
+            price_data = collector.fetch_batch(stock_ids, start_date, target_date)
+        else:
+            last_dates = db.get_last_date_per_stock()
+            price_data: dict[str, pd.DataFrame] = {}
+            batch_size = 50
+            for batch_start in range(0, len(stock_ids), batch_size):
+                batch = stock_ids[batch_start:batch_start + batch_size]
+                logger.info(
+                    "Batch {}/{}: processing {} stocks",
+                    batch_start // batch_size + 1,
+                    (len(stock_ids) + batch_size - 1) // batch_size,
+                    len(batch),
+                )
+                for sid in batch:
+                    last = last_dates.get(sid)
+                    if last:
+                        df = collector.fetch_incremental(sid, last)
+                    else:
+                        df = collector.fetch(sid, start_date, target_date)
+                    if df is not None and not df.empty:
+                        price_data[sid] = df
+                    time.sleep(collector.rate_limit)
         logger.info("Fetched price data for {}/{} stocks", len(price_data), len(stock_ids))
 
         if not price_data:
@@ -140,6 +189,20 @@ def main() -> None:
             valid_stocks[sid] = df
 
         logger.info("Quality check passed: {}/{} stocks", len(valid_stocks), len(price_data))
+
+        # -------------------------------------------------------------- #
+        # 2.5: For incremental mode, load full history for feature computation
+        # -------------------------------------------------------------- #
+        if not args.full_refresh and db is not None:
+            logger.info("Step 2.5: Loading full history for feature computation...")
+            for sid in list(valid_stocks.keys()):
+                full_df = db.get_prices([sid], start_date, target_date)
+                if not full_df.empty:
+                    full_df = full_df.set_index("date")
+                    if "stock_id" in full_df.columns:
+                        full_df = full_df.drop(columns=["stock_id"])
+                    full_df["stock_id"] = sid
+                    valid_stocks[sid] = full_df
 
         # -------------------------------------------------------------- #
         # 3. Compute features
@@ -224,6 +287,36 @@ def main() -> None:
             logger.warning("No active model found — skipping predictions")
 
         # -------------------------------------------------------------- #
+        # 5.5 Score all stocks
+        # -------------------------------------------------------------- #
+        logger.info("Step 5.5: Computing stock scores...")
+        scores_df = pd.DataFrame()
+        try:
+            from models.scoring import StockScorer
+            scorer = StockScorer()
+
+            # Prepare latest features per stock
+            latest_features = features_df.sort_values("date").groupby("stock_id").tail(1)
+
+            # Prepare predictions
+            pred_df = pd.DataFrame(predictions_list) if predictions_list else None
+
+            # Prepare price data for risk metrics
+            all_prices = pd.DataFrame()
+            if db is not None:
+                for sid in valid_stocks:
+                    p = db.get_prices([sid], start_date, target_date)
+                    if not p.empty:
+                        all_prices = pd.concat([all_prices, p], ignore_index=True)
+
+            scores_df = scorer.score_universe(latest_features, pred_df, all_prices)
+            if not scores_df.empty:
+                scores_df["date"] = target_date
+                logger.info("Computed scores for {} stocks", len(scores_df))
+        except Exception as e:
+            logger.error("Failed to compute scores: {}", e)
+
+        # -------------------------------------------------------------- #
         # 5. Save everything to Supabase
         # -------------------------------------------------------------- #
         if args.dry_run:
@@ -256,6 +349,13 @@ def main() -> None:
                 except Exception as e:
                     logger.error("Failed to save predictions: {}", e)
 
+            # Save scores
+            if not scores_df.empty:
+                try:
+                    db.save_scores(scores_df)
+                except Exception as e:
+                    logger.error("Failed to save scores: {}", e)
+
         # -------------------------------------------------------------- #
         # 6. Log summary and record success
         # -------------------------------------------------------------- #
@@ -264,6 +364,7 @@ def main() -> None:
             "stocks_total": len(stock_ids),
             "feature_rows": len(features_df),
             "predictions": len(predictions_list),
+            "scores": len(scores_df),
         }
         logger.info("=== Daily Update Summary ===")
         logger.info("Stocks processed: {}/{}", len(valid_stocks), len(stock_ids))

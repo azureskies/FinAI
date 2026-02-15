@@ -1,7 +1,7 @@
 """Tests for data.collectors.universe.UniverseCollector."""
 
 from datetime import date
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pandas as pd
 import pytest

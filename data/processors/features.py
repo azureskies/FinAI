@@ -37,7 +37,7 @@ class FeatureEngine:
             Original columns plus ~40 technical feature columns.
         """
         df = df.copy()
-        o, h, l, c, v = df["open"], df["high"], df["low"], df["close"], df["volume"]
+        _o, h, lo, c, v = df["open"], df["high"], df["low"], df["close"], df["volume"]
 
         # --- Momentum ---
         df["rsi_14"] = ta.momentum.RSIIndicator(c, window=14).rsi()
@@ -65,7 +65,7 @@ class FeatureEngine:
         df["sma_60"] = ta.trend.SMAIndicator(c, window=60).sma_indicator()
         df["sma_120"] = ta.trend.SMAIndicator(c, window=120).sma_indicator()
 
-        df["adx_14"] = ta.trend.ADXIndicator(h, l, c, window=14).adx()
+        df["adx_14"] = ta.trend.ADXIndicator(h, lo, c, window=14).adx()
 
         # --- Volatility ---
         bb = ta.volatility.BollingerBands(c, window=20, window_dev=2)
@@ -73,8 +73,8 @@ class FeatureEngine:
         df["bb_lower"] = bb.bollinger_lband()
         df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["sma_20"]
 
-        df["atr_14"] = ta.volatility.AverageTrueRange(h, l, c, window=14).average_true_range()
-        df["atr_28"] = ta.volatility.AverageTrueRange(h, l, c, window=28).average_true_range()
+        df["atr_14"] = ta.volatility.AverageTrueRange(h, lo, c, window=14).average_true_range()
+        df["atr_28"] = ta.volatility.AverageTrueRange(h, lo, c, window=28).average_true_range()
 
         log_ret = np.log(c / c.shift(1))
         df["hist_volatility_20"] = log_ret.rolling(window=20).std() * np.sqrt(252)
@@ -83,10 +83,10 @@ class FeatureEngine:
         df["obv"] = ta.volume.OnBalanceVolumeIndicator(c, v).on_balance_volume()
         df["volume_sma_20"] = v.rolling(window=20).mean()
         df["volume_change"] = v / df["volume_sma_20"] - 1
-        df["cmf"] = ta.volume.ChaikinMoneyFlowIndicator(h, l, c, v, window=20).chaikin_money_flow()
+        df["cmf"] = ta.volume.ChaikinMoneyFlowIndicator(h, lo, c, v, window=20).chaikin_money_flow()
 
         # --- Stochastic ---
-        stoch = ta.momentum.StochasticOscillator(h, l, c, window=14, smooth_window=3)
+        stoch = ta.momentum.StochasticOscillator(h, lo, c, window=14, smooth_window=3)
         df["stoch_k"] = stoch.stoch()
         df["stoch_d"] = stoch.stoch_signal()
 
@@ -96,7 +96,7 @@ class FeatureEngine:
 
         # --- Support / Resistance ---
         high_52w = h.rolling(window=252, min_periods=126).max()
-        low_52w = l.rolling(window=252, min_periods=126).min()
+        low_52w = lo.rolling(window=252, min_periods=126).min()
         df["pct_from_52w_high"] = c / high_52w - 1
         df["pct_from_52w_low"] = c / low_52w - 1
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.dependencies import get_db
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -47,7 +47,7 @@ class ModelMetricsResponse(BaseModel):
 @router.get("", response_model=ModelListResponse)
 def list_models(
     model_type: Optional[str] = Query(None, description="Filter by model type"),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> ModelListResponse:
     """List all model versions."""
     if db is None:
@@ -67,7 +67,7 @@ def list_models(
 @router.get("/active", response_model=ModelListResponse)
 def get_active_models(
     model_type: Optional[str] = Query(None, description="Filter by model type"),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> ModelListResponse:
     """Get currently active model(s)."""
     if db is None:
@@ -91,7 +91,7 @@ def get_active_models(
 @router.get("/{model_id}/metrics", response_model=ModelMetricsResponse)
 def get_model_metrics(
     model_id: str,
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> ModelMetricsResponse:
     """Get performance metrics for a specific model version."""
     if db is None:

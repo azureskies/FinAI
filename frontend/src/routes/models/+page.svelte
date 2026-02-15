@@ -22,20 +22,22 @@
 	let activeCount = $derived(models.filter((m) => m.is_active).length);
 
 	const columns = [
-		{ key: 'model_type', label: '模型类型' },
-		{ key: 'description', label: '说明' },
+		{ key: 'model_type', label: '模型類型' },
+		{ key: 'description', label: '說明' },
 		{
 			key: 'is_active',
-			label: '状态',
-			format: (v: unknown) => (v ? '启用中' : '未启用')
+			label: '狀態',
+			format: (v: unknown) => (v ? '啟用中' : '未啟用')
 		},
-		{ key: 'created_at', label: '建立时间' }
+		{ key: 'created_at', label: '建立時間' }
 	];
 
 	let selected: ModelVersion | null = $state(null);
-	let metricEntries = $derived(
-		selected?.metrics ? Object.entries(selected.metrics) : []
-	);
+	let metricEntries = $derived.by(() => {
+		const m = selected?.metrics;
+		if (!m) return [] as [string, number][];
+		return Object.entries(m) as [string, number][];
+	});
 
 	function handleRowClick(row: Record<string, unknown>) {
 		selected = models.find((m) => m.id === row.id) ?? null;
@@ -47,19 +49,19 @@
 </svelte:head>
 
 <div class="space-y-6">
-	<h1 class="text-2xl font-bold text-gray-800">模型管理</h1>
+	<h1 class="text-2xl font-bold" style="color: var(--text-primary);">模型管理</h1>
 
 	{#if loading}
-		<p class="text-gray-500">载入中...</p>
+		<p style="color: var(--text-secondary);">載入中...</p>
 	{:else if error}
-		<p class="text-red-500">错误: {error}</p>
+		<p style="color: var(--color-danger);">錯誤: {error}</p>
 	{:else}
 		<!-- Summary -->
 		<div class="grid grid-cols-2 gap-4 md:grid-cols-3">
-			<MetricCard title="模型总数" value={models.length} color="blue" />
-			<MetricCard title="启用中" value={activeCount} color="green" />
+			<MetricCard title="模型總數" value={models.length} color="blue" />
+			<MetricCard title="啟用中" value={activeCount} color="green" />
 			<MetricCard
-				title="模型类型"
+				title="模型類型"
 				value={new Set(models.map((m) => m.model_type).filter(Boolean)).size}
 				color="gray"
 			/>
@@ -67,11 +69,11 @@
 
 		<!-- Model list -->
 		<section>
-			<h2 class="mb-3 text-lg font-semibold text-gray-700">模型版本列表</h2>
+			<h2 class="mb-3 text-lg font-semibold" style="color: var(--text-primary);">模型版本列表</h2>
 			<DataTable
 				{columns}
 				rows={models as unknown as Record<string, unknown>[]}
-				emptyText="暂无模型版本"
+				emptyText="暫無模型版本"
 				onRowClick={handleRowClick}
 			/>
 		</section>
@@ -79,10 +81,10 @@
 		<!-- Selected model metrics -->
 		{#if selected}
 			<section>
-				<h2 class="mb-3 text-lg font-semibold text-gray-700">
+				<h2 class="mb-3 text-lg font-semibold" style="color: var(--text-primary);">
 					模型效能 — {selected.model_type ?? selected.id}
 					{#if selected.is_active}
-						<span class="ml-2 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">启用中</span>
+						<span class="ml-2 rounded px-2 py-0.5 text-xs font-medium" style="background-color: rgba(38,166,65,0.2); color: var(--color-success);">啟用中</span>
 					{/if}
 				</h2>
 
@@ -97,7 +99,7 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-gray-400">该模型无效能指标</p>
+					<p style="color: var(--text-secondary);">該模型無效能指標</p>
 				{/if}
 			</section>
 		{/if}

@@ -23,16 +23,18 @@
 	});
 
 	const listColumns = [
-		{ key: 'run_date', label: '执行日期' },
-		{ key: 'model_type', label: '模型类型' },
+		{ key: 'run_date', label: '執行日期' },
+		{ key: 'model_type', label: '模型類型' },
 		{ key: 'period_start', label: '起始日' },
-		{ key: 'period_end', label: '结束日' }
+		{ key: 'period_end', label: '結束日' }
 	];
 
 	// Extract metrics from selected result for display
-	let metricEntries = $derived(
-		selected?.metrics ? Object.entries(selected.metrics) : []
-	);
+	let metricEntries = $derived.by(() => {
+		const m = selected?.metrics;
+		if (!m) return [] as [string, number][];
+		return Object.entries(m) as [string, number][];
+	});
 
 	function handleRowClick(row: Record<string, unknown>) {
 		selected = results.find((r) => r.id === row.id) ?? null;
@@ -58,24 +60,24 @@
 </script>
 
 <svelte:head>
-	<title>FinAI - 回测结果</title>
+	<title>FinAI - 回測結果</title>
 </svelte:head>
 
 <div class="space-y-6">
-	<h1 class="text-2xl font-bold text-gray-800">回测结果</h1>
+	<h1 class="text-2xl font-bold" style="color: var(--text-primary);">回測結果</h1>
 
 	{#if loading}
-		<p class="text-gray-500">载入中...</p>
+		<p style="color: var(--text-secondary);">載入中...</p>
 	{:else if error}
-		<p class="text-red-500">错误: {error}</p>
+		<p style="color: var(--color-danger);">錯誤: {error}</p>
 	{:else}
 		<!-- Results list -->
 		<section>
-			<h2 class="mb-3 text-lg font-semibold text-gray-700">历史回测</h2>
+			<h2 class="mb-3 text-lg font-semibold" style="color: var(--text-primary);">歷史回測</h2>
 			<DataTable
 				columns={listColumns}
 				rows={results as unknown as Record<string, unknown>[]}
-				emptyText="暂无回测记录"
+				emptyText="暫無回測紀錄"
 				onRowClick={handleRowClick}
 			/>
 		</section>
@@ -83,8 +85,8 @@
 		<!-- Selected result metrics -->
 		{#if selected}
 			<section>
-				<h2 class="mb-3 text-lg font-semibold text-gray-700">
-					回测详情 — {selected.model_type ?? '未知模型'}
+				<h2 class="mb-3 text-lg font-semibold" style="color: var(--text-primary);">
+					回測詳情 — {selected.model_type ?? '未知模型'}
 					({selected.period_start} ~ {selected.period_end})
 				</h2>
 
@@ -99,7 +101,7 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-gray-400">该回测无指标资料</p>
+					<p style="color: var(--text-secondary);">該回測無指標資料</p>
 				{/if}
 			</section>
 		{/if}

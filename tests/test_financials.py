@@ -8,8 +8,6 @@ import pytest
 
 from data.collectors.financials import (
     FinancialsCollector,
-    QUARTERLY_DEADLINES,
-    MONTHLY_REVENUE_DEADLINE_DAY,
 )
 
 

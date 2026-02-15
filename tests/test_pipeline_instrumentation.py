@@ -33,7 +33,7 @@ class TestPipelineTrackerIntegration:
         tracker = PipelineTracker(mock_db)
 
         run_id = tracker.start_run("daily_update", metadata={"target_date": "2024-06-01"})
-        assert run_id == "run-test-001"
+        assert len(run_id) == 36  # UUID format
 
         tracker.finish_run(run_id, status="success", metrics={"stocks": 20})
 

@@ -1,6 +1,6 @@
 """Tests for data.collectors.price.PriceCollector."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd

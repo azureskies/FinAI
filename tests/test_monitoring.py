@@ -383,13 +383,10 @@ class TestPipelineTracker:
         return PipelineTracker(db=mock_db)
 
     def test_start_run(self, tracker, mock_db):
-        """start_run should insert a record and return ID."""
-        insert_resp = MagicMock()
-        insert_resp.data = [{"id": "run-001"}]
-        mock_db.client.table.return_value.insert.return_value.execute.return_value = insert_resp
-
+        """start_run should insert a record and return a UUID."""
         run_id = tracker.start_run("daily_update")
-        assert run_id == "run-001"
+        # run_id is now generated internally as UUID
+        assert len(run_id) == 36  # UUID format
         mock_db.client.table.assert_called_with("pipeline_runs")
 
     def test_finish_run(self, tracker, mock_db):

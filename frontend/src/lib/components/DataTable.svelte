@@ -15,7 +15,7 @@
 		onRowClick?: (row: Record<string, unknown>) => void;
 	}
 
-	let { columns, rows, emptyText = '暂无资料', onRowClick }: Props = $props();
+	let { columns, rows, emptyText = '暫無資料', onRowClick }: Props = $props();
 
 	function formatCell(col: Column, row: Record<string, unknown>): string {
 		const val = row[col.key];
@@ -31,34 +31,38 @@
 	};
 </script>
 
-<div class="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
-	<table class="min-w-full divide-y divide-gray-200">
-		<thead class="bg-gray-50">
+<div class="overflow-x-auto rounded-lg border" style="border-color: var(--border-color);">
+	<table class="min-w-full divide-y" style="--tw-divide-opacity: 1; --tw-divide-color: var(--border-color);">
+		<thead style="background-color: var(--bg-tertiary);">
 			<tr>
 				{#each columns as col}
 					<th
-						class="px-4 py-3 text-xs font-medium tracking-wider text-gray-500 uppercase {alignClass[col.align ?? 'left']}"
+						class="px-4 py-3 text-xs font-medium tracking-wider uppercase {alignClass[col.align ?? 'left']}"
+						style="color: var(--text-secondary);"
 					>
 						{col.label}
 					</th>
 				{/each}
 			</tr>
 		</thead>
-		<tbody class="divide-y divide-gray-100 bg-white">
+		<tbody class="divide-y" style="background-color: var(--bg-secondary); --tw-divide-color: var(--border-color);">
 			{#if rows.length === 0}
 				<tr>
-					<td colspan={columns.length} class="px-4 py-8 text-center text-gray-400">
+					<td colspan={columns.length} class="px-4 py-8 text-center" style="color: var(--text-secondary);">
 						{emptyText}
 					</td>
 				</tr>
 			{:else}
 				{#each rows as row}
 					<tr
-						class="{onRowClick ? 'cursor-pointer hover:bg-gray-50' : ''}"
+						class="{onRowClick ? 'cursor-pointer' : ''}"
+						style="{onRowClick ? '--hover-bg: var(--bg-tertiary);' : ''}"
+						onmouseenter={(e) => { if (onRowClick) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-tertiary)'; }}
+						onmouseleave={(e) => { if (onRowClick) (e.currentTarget as HTMLElement).style.backgroundColor = ''; }}
 						onclick={() => onRowClick?.(row)}
 					>
 						{#each columns as col}
-							<td class="whitespace-nowrap px-4 py-3 text-sm text-gray-700 {alignClass[col.align ?? 'left']}">
+							<td class="whitespace-nowrap px-4 py-3 text-sm {alignClass[col.align ?? 'left']}" style="color: var(--text-primary);">
 								{formatCell(col, row)}
 							</td>
 						{/each}

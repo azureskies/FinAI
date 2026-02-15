@@ -2,7 +2,7 @@
 
 import pickle
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ import yaml
 from loguru import logger
 from scipy.stats import spearmanr
 
-from models.baseline import BuyHoldBaseline, RidgePredictor
+from models.baseline import RidgePredictor
 from models.ensemble import EnsemblePredictor
 from models.tree_models import RandomForestPredictor, XGBoostPredictor
 
@@ -59,13 +59,20 @@ class ModelTrainer:
         """
         split_cfg = self.config["training"]["time_split"]
 
-        train = df.loc[split_cfg["train_start"]:split_cfg["train_end"]]
-        val = df.loc[split_cfg["val_start"]:split_cfg["val_end"]]
-        test = df.loc[split_cfg["test_start"]:split_cfg["test_end"]]
+        train_start = split_cfg["train_start"]
+        train_end = split_cfg["train_end"]
+        val_start = split_cfg["val_start"]
+        val_end = split_cfg["val_end"]
+        test_start = split_cfg["test_start"]
+        test_end = split_cfg["test_end"]
+
+        train = df.loc[train_start:train_end]
+        val = df.loc[val_start:val_end]
+        test = df.loc[test_start:test_end]
 
         logger.info(
-            f"Time split - train: {len(train)} rows ({split_cfg['train_start']}~"
-            f"{split_cfg['train_end']}), val: {len(val)} rows, test: {len(test)} rows"
+            f"Time split - train: {len(train)} rows ({train_start}~"
+            f"{train_end}), val: {len(val)} rows, test: {len(test)} rows"
         )
         return {"train": train, "val": val, "test": test}
 

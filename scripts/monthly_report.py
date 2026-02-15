@@ -21,7 +21,7 @@ import yaml
 from loguru import logger
 
 from data.collectors.price import PriceCollector
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 _BACKTEST_CONFIG_PATH = "configs/backtest_config.yaml"
 
@@ -112,7 +112,9 @@ def main() -> None:
     logger.info("=== Monthly Report ===")
     logger.info("Period: {} to {}", start_date, end_date)
 
-    db = SupabaseLoader()
+    db = DatabaseLoader()
+    if hasattr(db, "init_schema"):
+        db.init_schema()
     collector = PriceCollector()
 
     # Pipeline tracking and alerting

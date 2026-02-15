@@ -13,9 +13,6 @@ optuna>=3.4.0
 # Technical Analysis
 ta>=0.11.0
 
-# Database
-supabase>=2.0.0
-
 # API
 fastapi>=0.104.0
 uvicorn>=0.24.0
@@ -27,4 +24,6 @@ loguru>=0.7.0
 
 # Dev
 pytest>=7.4.0
+pytest-cov>=4.1.0
+httpx>=0.25.0
 ruff>=0.1.0

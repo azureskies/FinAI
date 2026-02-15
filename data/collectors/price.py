@@ -117,6 +117,38 @@ class PriceCollector:
         )
         return results
 
+    def fetch_incremental(
+        self,
+        stock_id: str,
+        last_date: str,
+        *,
+        market: str = "twse",
+    ) -> Optional[pd.DataFrame]:
+        """Fetch data from last_date+1 to today.
+
+        Args:
+            stock_id: Taiwan stock code, e.g. "2330".
+            last_date: Last date already in DB, e.g. "2024-01-15".
+            market: "twse" (listed) or "otc" (OTC).
+
+        Returns:
+            DataFrame with new rows, or None if no new data.
+        """
+        from datetime import date as _date, timedelta
+
+        next_day = _date.fromisoformat(last_date) + timedelta(days=1)
+        today = _date.today()
+        if next_day > today:
+            logger.debug("{}: already up to date (last_date={})", stock_id, last_date)
+            return None
+
+        return self.fetch(
+            stock_id,
+            str(next_day),
+            str(today),
+            market=market,
+        )
+
     def compute_adjusted_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
         """Compute adjusted OHLCV using the adj_close / close ratio.
 

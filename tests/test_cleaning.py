@@ -161,7 +161,7 @@ class TestDetectOutliers:
         std = df["close"].std()
         df.iloc[10, df.columns.get_loc("close")] = mean + 10 * std
         outliers = cleaner.detect_outliers(df, "close")
-        assert outliers.iloc[10] is True or outliers.iloc[10] == True
+        assert outliers.iloc[10] is True or outliers.iloc[10]
 
     def test_zero_std_returns_all_false(self, cleaner):
         """Constant column (std=0) should produce no outliers."""

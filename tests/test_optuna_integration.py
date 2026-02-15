@@ -1,6 +1,5 @@
 """Tests for Optuna hyperparameter optimization integration in weekly_retrain."""
 
-import argparse
 from unittest.mock import patch
 
 import numpy as np

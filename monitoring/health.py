@@ -15,7 +15,7 @@ import pandas as pd
 import yaml
 from loguru import logger
 
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 _CONFIG_PATH = "configs/monitoring.yaml"
 
@@ -65,7 +65,7 @@ class HealthChecker:
 
     def __init__(
         self,
-        db: SupabaseLoader,
+        db: DatabaseLoader,
         config: Optional[dict] = None,
     ) -> None:
         self.db = db

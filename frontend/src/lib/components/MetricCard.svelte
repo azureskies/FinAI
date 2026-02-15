@@ -13,14 +13,17 @@
 		green: 'border-l-green-500',
 		red: 'border-l-red-500',
 		yellow: 'border-l-yellow-500',
-		gray: 'border-l-gray-400'
+		gray: 'border-l-gray-500'
 	};
 </script>
 
-<div class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm border-l-4 {colorMap[color]}">
-	<p class="text-sm text-gray-500">{title}</p>
-	<p class="mt-1 text-2xl font-bold text-gray-900">{value}</p>
+<div
+	class="rounded-lg border-l-4 p-5 {colorMap[color]}"
+	style="background-color: var(--bg-secondary); border-color: var(--border-color); border-right: 1px solid var(--border-color); border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);"
+>
+	<p class="text-sm" style="color: var(--text-secondary);">{title}</p>
+	<p class="mt-1 text-2xl font-bold" style="color: var(--text-primary);">{value}</p>
 	{#if subtitle}
-		<p class="mt-1 text-xs text-gray-400">{subtitle}</p>
+		<p class="mt-1 text-xs" style="color: var(--text-secondary);">{subtitle}</p>
 	{/if}
 </div>

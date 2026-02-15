@@ -17,8 +17,7 @@ import os
 import pickle
 import sys
 import tempfile
-from datetime import date, timedelta
-from pathlib import Path
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -28,8 +27,7 @@ from scipy.stats import spearmanr
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
 
-from data.loaders.supabase import SupabaseLoader
-from data.processors.features import FeatureEngine
+from data.loaders import DatabaseLoader
 from models.tree_models import RandomForestPredictor, XGBoostPredictor
 
 _MODEL_PARAMS_PATH = "configs/model_params.yaml"
@@ -131,7 +129,9 @@ def main() -> None:
     # 1. Load historical data from Supabase
     # ------------------------------------------------------------------ #
     logger.info("Step 1: Loading historical data...")
-    db = SupabaseLoader()
+    db = DatabaseLoader()
+    if hasattr(db, "init_schema"):
+        db.init_schema()
 
     # Pipeline tracking and alerting
     tracker = None
@@ -168,24 +168,42 @@ def main() -> None:
 def _run_retrain_pipeline(args, params, db, tracker, alert_mgr, run_id) -> None:
     """Core retrain pipeline logic, extracted for error handling."""
     training_cfg = params.get("training", {}).get("time_split", {})
-    train_start = training_cfg.get("train_start", "2018-01-01")
-    test_end = training_cfg.get("test_end", str(date.today()))
-    val_start = training_cfg.get("val_start", "2022-01-01")
 
-    # Load a representative universe
-    default_universe = [
-        "2330", "2317", "2454", "2308", "2881",
-        "2882", "2891", "2303", "1301", "1303",
-        "2412", "3711", "2886", "2884", "3008",
-        "2357", "2382", "6505", "1326", "2002",
-    ]
+    # Auto-detect data range from database; fall back to YAML config
+    date_range = None
+    if hasattr(db, "get_date_range"):
+        date_range = db.get_date_range("stock_features")
 
-    features_df = db.get_features(default_universe, train_start, test_end)
+    if date_range:
+        train_start, test_end = date_range
+        logger.info("Auto-detected data range: {} ~ {}", train_start, test_end)
+    else:
+        train_start = training_cfg.get("train_start", "2018-01-01")
+        test_end = training_cfg.get("test_end", str(date.today()))
+        logger.info("Using YAML fallback range: {} ~ {}", train_start, test_end)
+
+    # Auto-detect stock universe from database; fall back to hardcoded list
+    universe = []
+    if hasattr(db, "get_available_stock_ids"):
+        universe = db.get_available_stock_ids("stock_features")
+
+    if not universe:
+        universe = [
+            "2330", "2317", "2454", "2308", "2881",
+            "2882", "2891", "2303", "1301", "1303",
+            "2412", "3711", "2886", "2884", "3008",
+            "2357", "2382", "6505", "1326", "2002",
+        ]
+        logger.info("Using default universe: {} stocks", len(universe))
+    else:
+        logger.info("Auto-detected universe: {} stocks", len(universe))
+
+    features_df = db.get_features(universe, train_start, test_end)
     if features_df.empty:
         raise RuntimeError("No feature data found")
     logger.info("Loaded features: {} rows", len(features_df))
 
-    prices_df = db.get_prices(default_universe, train_start, test_end)
+    prices_df = db.get_prices(universe, train_start, test_end)
     if prices_df.empty:
         raise RuntimeError("No price data found")
 
@@ -211,9 +229,19 @@ def _run_retrain_pipeline(args, params, db, tracker, alert_mgr, run_id) -> None:
     merged = merged.dropna(subset=["forward_return"])
     logger.info("Merged dataset: {} rows", len(merged))
 
-    # Split train/validation
+    # Split train/validation — dynamic 80/20 split with at least 60 days for validation
     meta_cols = {"date", "stock_id", "forward_return"}
     feat_cols = [c for c in merged.columns if c not in meta_cols]
+
+    unique_dates = sorted(merged["date"].unique())
+    min_val_days = 60
+    split_idx = max(
+        int(len(unique_dates) * 0.8),
+        len(unique_dates) - min_val_days,
+    )
+    split_idx = min(split_idx, len(unique_dates) - 1)
+    val_start = str(unique_dates[split_idx])[:10]
+    logger.info("Dynamic val_start: {} (index {}/{})", val_start, split_idx, len(unique_dates))
 
     train_mask = merged["date"] < val_start
     val_mask = merged["date"] >= val_start
@@ -233,7 +261,7 @@ def _run_retrain_pipeline(args, params, db, tracker, alert_mgr, run_id) -> None:
     # ------------------------------------------------------------------ #
     optuna_cfg = params.get("optuna", {})
     default_n_trials = optuna_cfg.get("n_trials", 50)
-    default_timeout = optuna_cfg.get("timeout", 3600)
+    _ = optuna_cfg.get("timeout", 3600)
     # Per-model timeout: divide total timeout among optimizable models
     per_model_timeout = 600  # 10 minutes per model as reasonable default
 

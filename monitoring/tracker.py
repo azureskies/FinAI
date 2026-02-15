@@ -6,18 +6,19 @@ in the Supabase pipeline_runs table for monitoring and auditing.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Optional
 
 from loguru import logger
 
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 
 class PipelineTracker:
     """Track pipeline execution in Supabase."""
 
-    def __init__(self, db: SupabaseLoader) -> None:
+    def __init__(self, db: DatabaseLoader) -> None:
         self.db = db
 
     def start_run(
@@ -34,14 +35,15 @@ class PipelineTracker:
         Returns:
             Run ID (UUID string).
         """
+        run_id = str(uuid.uuid4())
         record = {
+            "id": run_id,
             "pipeline_name": pipeline_name,
             "start_time": datetime.now().isoformat(),
             "status": "running",
             "metadata": metadata or {},
         }
-        resp = self.db.client.table("pipeline_runs").insert(record).execute()
-        run_id = resp.data[0]["id"]
+        self.db.client.table("pipeline_runs").insert(record).execute()
         logger.info("Pipeline run started: {} (id={})", pipeline_name, run_id)
         return run_id
 

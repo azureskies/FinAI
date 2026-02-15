@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.dependencies import get_db
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
@@ -52,7 +52,7 @@ class PipelineRunsResponse(BaseModel):
 
 @router.get("/health", response_model=HealthResponse)
 def health_status(
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> HealthResponse:
     """Run health checks and return status."""
     if db is None:
@@ -89,7 +89,7 @@ def health_status(
 def pipeline_runs(
     pipeline_name: Optional[str] = Query(None, description="Filter by pipeline name"),
     limit: int = Query(10, ge=1, le=50, description="Max results"),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> PipelineRunsResponse:
     """Get recent pipeline execution history."""
     if db is None:

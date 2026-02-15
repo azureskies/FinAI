@@ -47,12 +47,15 @@ training:
     step_days: 63              # retrain every quarter
 
   time_split:
+    # Fallback values — weekly_retrain.py auto-detects actual data range
+    # from the database using get_date_range(). These are only used if
+    # the database query fails or for ModelTrainer.time_split().
     train_start: "2018-01-01"
     train_end: "2021-12-31"
     val_start: "2022-01-01"
-    val_end: "2022-12-31"
-    test_start: "2023-01-01"
-    test_end: "2024-12-31"
+    val_end: "2023-12-31"
+    test_start: "2024-01-01"
+    test_end: "2026-12-31"
 
 feature_selection:
   correlation_threshold: 0.95   # Remove features with corr > 0.95

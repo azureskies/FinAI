@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from backtest.engine import BacktestEngine, BacktestResult
 from data.processors.cleaning import DataCleaner
@@ -59,7 +58,7 @@ class TestFullPipeline:
 
         split = int(len(features) * 0.7)
         X_train, X_val = features.iloc[:split], features.iloc[split:]
-        y_train, y_val = y.iloc[:split], y.iloc[split:]
+        y_train, _y_val = y.iloc[:split], y.iloc[split:]
 
         # Step 4: Train models
         ridge = RidgePredictor(alpha=1.0)
@@ -159,7 +158,6 @@ class TestWalkForward:
         prices = synthetic_multi_stock_prices
         dates = sorted(prices["date"].unique())
         stock_ids = prices["stock_id"].unique()
-        n_dates = len(dates)
         n_features = 5
 
         # Build feature_data with target

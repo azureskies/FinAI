@@ -12,7 +12,7 @@ import sys
 
 from loguru import logger
 
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 from monitoring.alerts import AlertLevel, AlertManager
 from monitoring.health import CheckStatus, HealthChecker
 
@@ -31,7 +31,9 @@ def main() -> None:
     args = parse_args()
 
     logger.info("=== FinAI Health Check ===")
-    db = SupabaseLoader()
+    db = DatabaseLoader()
+    if hasattr(db, "init_schema"):
+        db.init_schema()
     checker = HealthChecker(db)
     report = checker.run_all_checks()
 

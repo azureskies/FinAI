@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.dependencies import get_db
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
@@ -54,7 +54,7 @@ class BacktestRunResponse(BaseModel):
 @router.get("/results", response_model=BacktestListResponse)
 def list_backtest_results(
     limit: int = Query(10, ge=1, le=50),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> BacktestListResponse:
     """List recent backtest results."""
     if db is None:
@@ -71,7 +71,7 @@ def list_backtest_results(
 @router.get("/{result_id}", response_model=BacktestSummary)
 def get_backtest_result(
     result_id: str,
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> BacktestSummary:
     """Get a specific backtest result by ID."""
     if db is None:
@@ -97,7 +97,7 @@ def get_backtest_result(
 def run_backtest(
     request: BacktestRunRequest,
     background_tasks: BackgroundTasks,
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> BacktestRunResponse:
     """Trigger a new backtest run (async)."""
     if db is None:
@@ -112,7 +112,7 @@ def run_backtest(
     )
 
 
-def _execute_backtest(db: SupabaseLoader, request: BacktestRunRequest) -> None:
+def _execute_backtest(db: DatabaseLoader, request: BacktestRunRequest) -> None:
     """Background task that runs a backtest and saves results.
 
     Loads price data and predictions from Supabase, runs the backtest
@@ -237,7 +237,7 @@ def _execute_backtest(db: SupabaseLoader, request: BacktestRunRequest) -> None:
         logger.exception("Backtest execution failed: {}", exc)
 
 
-def _get_predictor(db: SupabaseLoader, model_type: str):
+def _get_predictor(db: DatabaseLoader, model_type: str):
     """Load active model or return a simple fallback predictor.
 
     Attempts to load the active model from DB. If unavailable, returns

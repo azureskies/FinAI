@@ -60,12 +60,26 @@
 				responsive: true,
 				maintainAspectRatio: false,
 				plugins: {
-					title: { display: !!title, text: title },
-					legend: { position: 'top' }
+					title: {
+						display: !!title,
+						text: title,
+						color: '#e6edf3'
+					},
+					legend: {
+						position: 'top',
+						labels: { color: '#8b949e' }
+					}
 				},
 				scales: {
-					x: { grid: { display: false } },
-					y: { beginAtZero: false }
+					x: {
+						grid: { color: '#21262d' },
+						ticks: { color: '#8b949e' }
+					},
+					y: {
+						beginAtZero: false,
+						grid: { color: '#21262d' },
+						ticks: { color: '#8b949e' }
+					}
 				}
 			}
 		});

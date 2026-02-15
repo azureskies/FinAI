@@ -9,15 +9,19 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies first (better layer caching)
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY api/ api/
 COPY backtest/ backtest/
 COPY data/ data/
 COPY models/ models/
-COPY config/ config/
+COPY configs/ configs/
+COPY monitoring/ monitoring/
+COPY scripts/ scripts/
+
+ENV DB_BACKEND=sqlite
 
 EXPOSE 8000
 

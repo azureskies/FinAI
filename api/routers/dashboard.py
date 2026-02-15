@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.dependencies import get_db
-from data.loaders.supabase import SupabaseLoader
+from data.loaders import DatabaseLoader
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -33,8 +33,24 @@ class TopPick(BaseModel):
     date: Optional[str] = None
 
 
+class ScoredStock(BaseModel):
+    stock_id: str
+    composite_score: Optional[float] = None
+    momentum_score: Optional[float] = None
+    trend_score: Optional[float] = None
+    volatility_score: Optional[float] = None
+    volume_score: Optional[float] = None
+    ai_score: Optional[float] = None
+    risk_level: Optional[str] = None
+    max_drawdown: Optional[float] = None
+    volatility_ann: Optional[float] = None
+    win_rate: Optional[float] = None
+    predicted_return: Optional[float] = None
+    date: Optional[str] = None
+
+
 class TopPicksResponse(BaseModel):
-    picks: list[TopPick]
+    picks: list[ScoredStock]
     message: Optional[str] = None
 
 
@@ -44,7 +60,7 @@ class TopPicksResponse(BaseModel):
 
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> DashboardSummary:
     """Get overall dashboard statistics."""
     if db is None:
@@ -88,23 +104,56 @@ def dashboard_summary(
 @router.get("/top-picks", response_model=TopPicksResponse)
 def top_picks(
     n: int = Query(10, ge=1, le=50, description="Number of top picks to return"),
-    db: Optional[SupabaseLoader] = Depends(get_db),
+    db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> TopPicksResponse:
     """Get top N stocks by latest prediction score."""
     if db is None:
         return TopPicksResponse(picks=[], message="Supabase not configured")
 
     try:
+        # Try scores-based ranking first
+        if hasattr(db, "get_latest_scores"):
+            scores_df = db.get_latest_scores(limit=n)
+            if not scores_df.empty:
+                # Merge with predictions for predicted_return
+                pred_df = db.get_latest_predictions()
+                pred_map = {}
+                if not pred_df.empty:
+                    pred_map = dict(
+                        zip(pred_df["stock_id"], pred_df["predicted_return"])
+                    )
+
+                picks = [
+                    ScoredStock(
+                        stock_id=row["stock_id"],
+                        composite_score=row.get("composite_score"),
+                        momentum_score=row.get("momentum_score"),
+                        trend_score=row.get("trend_score"),
+                        volatility_score=row.get("volatility_score"),
+                        volume_score=row.get("volume_score"),
+                        ai_score=row.get("ai_score"),
+                        risk_level=row.get("risk_level"),
+                        max_drawdown=row.get("max_drawdown"),
+                        volatility_ann=row.get("volatility_ann"),
+                        win_rate=row.get("win_rate"),
+                        predicted_return=pred_map.get(row["stock_id"]),
+                        date=str(row.get("date", ""))[:10],
+                    )
+                    for _, row in scores_df.iterrows()
+                ]
+                return TopPicksResponse(picks=picks)
+
+        # Fallback to predictions-based ranking
         df = db.get_latest_predictions()
         if df.empty:
             return TopPicksResponse(picks=[], message="No predictions available")
 
         top = df.head(n)
         picks = [
-            TopPick(
+            ScoredStock(
                 stock_id=row["stock_id"],
                 predicted_return=row["predicted_return"],
-                score=row["score"],
+                composite_score=row.get("score"),
                 date=str(row["date"])[:10],
             )
             for _, row in top.iterrows()

@@ -34,8 +34,40 @@ export interface TopPick {
 	date: string | null;
 }
 
+export interface ScoredStock {
+	stock_id: string;
+	composite_score: number | null;
+	momentum_score: number | null;
+	trend_score: number | null;
+	volatility_score: number | null;
+	volume_score: number | null;
+	ai_score: number | null;
+	risk_level: string | null;
+	max_drawdown: number | null;
+	volatility_ann: number | null;
+	win_rate: number | null;
+	predicted_return: number | null;
+	date: string | null;
+}
+
 export interface TopPicksResponse {
-	picks: TopPick[];
+	picks: ScoredStock[];
+	message: string | null;
+}
+
+export interface StockScoreResponse {
+	stock_id: string;
+	composite_score: number | null;
+	momentum_score: number | null;
+	trend_score: number | null;
+	volatility_score: number | null;
+	volume_score: number | null;
+	ai_score: number | null;
+	risk_level: string | null;
+	max_drawdown: number | null;
+	volatility_ann: number | null;
+	win_rate: number | null;
+	date: string | null;
 	message: string | null;
 }
 
@@ -123,6 +155,14 @@ export function getStockFeatures(stockId: string, startDate?: string, endDate?: 
 
 export function getStockPredictions(stockId: string) {
 	return request<PredictionResponse>(`/stocks/${stockId}/predictions`);
+}
+
+export function getStockScore(stockId: string) {
+	return request<StockScoreResponse>(`/stocks/${stockId}/score`);
+}
+
+export function getTopScored(n = 10) {
+	return request<TopPicksResponse>(`/dashboard/top-picks?n=${n}`);
 }
 
 // ------------------------------------------------------------------ //
