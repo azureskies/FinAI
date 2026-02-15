@@ -18,7 +18,10 @@ import time
 from datetime import date, timedelta
 
 import pandas as pd
+from dotenv import load_dotenv
 from loguru import logger
+
+load_dotenv()
 
 from data.collectors.price import PriceCollector
 from data.loaders import DatabaseLoader
@@ -67,17 +70,36 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _load_universe(stock_id: str | None) -> list[str]:
-    """Load stock universe from UniverseCollector or use single stock."""
+def _load_universe(stock_id: str | None) -> tuple[list[str], dict[str, str]]:
+    """Load stock universe from UniverseCollector or use single stock.
+
+    Returns:
+        (stock_ids, market_map) where market_map is {stock_id: "twse"|"otc"}.
+    """
     if stock_id:
-        return [stock_id]
+        return [stock_id], {stock_id: "twse"}
 
     try:
         from data.collectors.universe import UniverseCollector
         collector = UniverseCollector()
         universe_df = collector.get_universe(date.today())
         if not universe_df.empty and "stock_id" in universe_df.columns:
+            # Exclude emerging market stocks (low liquidity)
+            if "market" in universe_df.columns:
+                universe_df = universe_df[
+                    universe_df["market"].isin(["twse", "otc", "tpex"])
+                ]
             stock_ids = universe_df["stock_id"].tolist()
+
+            # Build market map: tpex is also OTC for yfinance purposes
+            market_map: dict[str, str] = {}
+            if "market" in universe_df.columns:
+                for _, row in universe_df.iterrows():
+                    mkt = row["market"]
+                    market_map[row["stock_id"]] = "otc" if mkt in ("otc", "tpex") else "twse"
+            else:
+                market_map = {sid: "twse" for sid in stock_ids}
+
             logger.info("Loaded {} stocks from UniverseCollector", len(stock_ids))
 
             # Save universe to DB
@@ -88,11 +110,11 @@ def _load_universe(stock_id: str | None) -> list[str]:
                 db.upsert_universe(universe_df)
             db.close()
 
-            return stock_ids
+            return stock_ids, market_map
     except Exception as e:
         logger.warning("Failed to fetch universe from API: {}", e)
 
-    # Fallback to default list
+    # Fallback to default list (all TWSE)
     default_universe = [
         "2330", "2317", "2454", "2308", "2881",
         "2882", "2891", "2303", "1301", "1303",
@@ -100,7 +122,7 @@ def _load_universe(stock_id: str | None) -> list[str]:
         "2357", "2382", "6505", "1326", "2002",
     ]
     logger.info("Using default universe: {} stocks", len(default_universe))
-    return default_universe
+    return default_universe, {sid: "twse" for sid in default_universe}
 
 
 def main() -> None:
@@ -136,7 +158,7 @@ def main() -> None:
             "daily_update", metadata={"target_date": target_date}
         )
 
-    stock_ids = _load_universe(args.stock_id)
+    stock_ids, market_map = _load_universe(args.stock_id)
     logger.info("Processing {} stocks", len(stock_ids))
 
     try:
@@ -145,11 +167,13 @@ def main() -> None:
         # -------------------------------------------------------------- #
         logger.info("Step 1: Fetching price data...")
         if args.full_refresh or db is None:
-            logger.info("Full refresh mode — fetching all data")
-            price_data = collector.fetch_batch(stock_ids, start_date, target_date)
+            logger.info("Full refresh mode — fetching all data via batch download")
+            price_data = collector.fetch_batch(
+                stock_ids, start_date, target_date, market_map=market_map,
+            )
         else:
             last_dates = db.get_last_date_per_stock()
-            price_data: dict[str, pd.DataFrame] = {}
+            price_data = {}
             batch_size = 50
             for batch_start in range(0, len(stock_ids), batch_size):
                 batch = stock_ids[batch_start:batch_start + batch_size]
@@ -160,11 +184,12 @@ def main() -> None:
                     len(batch),
                 )
                 for sid in batch:
+                    mkt = market_map.get(sid, "twse")
                     last = last_dates.get(sid)
                     if last:
-                        df = collector.fetch_incremental(sid, last)
+                        df = collector.fetch_incremental(sid, last, market=mkt)
                     else:
-                        df = collector.fetch(sid, start_date, target_date)
+                        df = collector.fetch(sid, start_date, target_date, market=mkt)
                     if df is not None and not df.empty:
                         price_data[sid] = df
                     time.sleep(collector.rate_limit)
@@ -301,13 +326,19 @@ def main() -> None:
             # Prepare predictions
             pred_df = pd.DataFrame(predictions_list) if predictions_list else None
 
-            # Prepare price data for risk metrics
+            # Prepare price data for risk metrics (all scored stocks, batched)
             all_prices = pd.DataFrame()
             if db is not None:
-                for sid in valid_stocks:
-                    p = db.get_prices([sid], start_date, target_date)
+                scored_ids = latest_features["stock_id"].tolist()
+                batch_sz = 500
+                price_parts = []
+                for bi in range(0, len(scored_ids), batch_sz):
+                    batch_ids = scored_ids[bi:bi + batch_sz]
+                    p = db.get_prices(batch_ids, start_date, target_date)
                     if not p.empty:
-                        all_prices = pd.concat([all_prices, p], ignore_index=True)
+                        price_parts.append(p)
+                if price_parts:
+                    all_prices = pd.concat(price_parts, ignore_index=True)
 
             scores_df = scorer.score_universe(latest_features, pred_df, all_prices)
             if not scores_df.empty:

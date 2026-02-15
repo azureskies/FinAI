@@ -7,7 +7,7 @@ price_sources:
     priority: 1
     suffix: ".TW"        # Append to stock_id for TWSE
     otc_suffix: ".TWO"   # Append to stock_id for OTC
-    rate_limit: 2.0       # seconds between requests
+    rate_limit: 1.0       # seconds between batch requests
 
   - name: finmind
     enabled: true

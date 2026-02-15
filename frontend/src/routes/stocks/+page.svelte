@@ -15,7 +15,7 @@
 
 	onMount(async () => {
 		try {
-			const [stockRes, pickRes] = await Promise.all([listStocks(), getTopPicks(50)]);
+			const [stockRes, pickRes] = await Promise.all([listStocks(), getTopPicks(5000)]);
 			stocks = stockRes.stocks;
 			picks = pickRes.picks;
 		} catch (e) {

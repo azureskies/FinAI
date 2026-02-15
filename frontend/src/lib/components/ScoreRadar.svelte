@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		Chart as ChartJS,
+		RadarController,
 		RadialLinearScale,
 		PointElement,
 		LineElement,
@@ -10,7 +11,7 @@
 		Legend
 	} from 'chart.js';
 
-	ChartJS.register(RadialLinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
+	ChartJS.register(RadarController, RadialLinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
 
 	interface Props {
 		momentum: number;

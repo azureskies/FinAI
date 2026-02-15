@@ -179,6 +179,7 @@ export interface BacktestSummary {
 	period_end: string | null;
 	metrics: Record<string, number> | null;
 	config: Record<string, unknown> | null;
+	created_at: string | null;
 }
 
 export interface BacktestListResponse {
@@ -192,6 +193,12 @@ export function listBacktestResults(limit = 10) {
 
 export function getBacktestResult(id: string) {
 	return request<BacktestSummary>(`/backtest/${id}`);
+}
+
+export function deleteBacktestResult(id: string) {
+	return request<{ status: string; message: string }>(`/backtest/${id}`, {
+		method: 'DELETE'
+	});
 }
 
 // ------------------------------------------------------------------ //
@@ -279,6 +286,14 @@ export interface BacktestRunRequest {
 export interface BacktestRunResponse {
 	status: string;
 	message: string;
+	task_id: string | null;
+}
+
+export interface BacktestTaskStatus {
+	task_id: string;
+	status: string;
+	progress: string | null;
+	error: string | null;
 }
 
 export function runBacktest(req: BacktestRunRequest) {
@@ -287,6 +302,10 @@ export function runBacktest(req: BacktestRunRequest) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(req)
 	});
+}
+
+export function getBacktestTaskStatus(taskId: string) {
+	return request<BacktestTaskStatus>(`/backtest/status/${taskId}`);
 }
 
 // ------------------------------------------------------------------ //

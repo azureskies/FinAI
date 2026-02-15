@@ -7,7 +7,7 @@ predictions, and backtest results stored in Supabase (PostgreSQL).
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 import pandas as pd
@@ -341,6 +341,7 @@ class SupabaseLoader:
             "period_end": str(result["period_end"]) if "period_end" in result else None,
             "metrics": result.get("metrics", {}),
             "config": result.get("config", {}),
+            "created_at": datetime.now().isoformat(),
         }
         resp = self.client.table("backtest_results").insert(record).execute()
         result_id = resp.data[0]["id"]
@@ -354,16 +355,25 @@ class SupabaseLoader:
             limit: Maximum number of results to return.
 
         Returns:
-            List of backtest result dicts ordered by run_date desc.
+            List of backtest result dicts ordered by created_at desc.
         """
         resp = (
             self.client.table("backtest_results")
             .select("*")
-            .order("run_date", desc=True)
+            .order("created_at", desc=True)
             .limit(limit)
             .execute()
         )
         return resp.data
+
+    def delete_backtest(self, result_id: str) -> None:
+        """Delete a backtest result by ID.
+
+        Args:
+            result_id: UUID of the backtest result to delete.
+        """
+        self.client.table("backtest_results").delete().eq("id", result_id).execute()
+        logger.info("Deleted backtest result {}", result_id)
 
 
 # ---------------------------------------------------------------------- #

@@ -67,8 +67,11 @@
 								<span class="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold" style="background-color: var(--bg-primary); color: var(--color-accent);">
 									{i + 1}
 								</span>
-								<a href="/stocks/{pick.stock_id}" class="w-16 font-mono font-bold hover:underline" style="color: var(--color-accent);">
-									{pick.stock_id}
+								<a href="/stocks/{pick.stock_id}" class="w-32 font-bold hover:underline" style="color: var(--color-accent);">
+									<span class="font-mono">{pick.stock_id}</span>
+									{#if pick.stock_name}
+										<span class="ml-1 text-xs" style="color: var(--text-secondary);">{pick.stock_name}</span>
+									{/if}
 								</a>
 								<div class="flex-1">
 									<ScoreBar score={pick.composite_score ?? 0} label="總分" />

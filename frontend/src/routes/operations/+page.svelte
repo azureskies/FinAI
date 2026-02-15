@@ -4,7 +4,6 @@
 		checkHealth,
 		getDashboardSummary,
 		runPipeline,
-		runBacktest,
 		getPipelineRuns,
 		getPipelineStatus,
 		type DashboardSummary,
@@ -22,16 +21,6 @@
 	let pipelineMessage = $state('');
 	let pipelineError = $state('');
 	let activeTasks = $state<PipelineTaskStatus[]>([]);
-
-	// --- Backtest ---
-	let btModelType = $state('ensemble');
-	let btMode = $state<'run' | 'walk_forward'>('run');
-	let btStart = $state('');
-	let btEnd = $state('');
-	let btCapital = $state(10000000);
-	let btLoading = $state(false);
-	let btMessage = $state('');
-	let btError = $state('');
 
 	// --- Pipeline history ---
 	let pipelineRuns = $state<PipelineRunItem[]>([]);
@@ -96,27 +85,6 @@
 			}
 		};
 		poll();
-	}
-
-	async function handleRunBacktest() {
-		btLoading = true;
-		btMessage = '';
-		btError = '';
-		try {
-			const req: Record<string, unknown> = {
-				model_type: btModelType,
-				mode: btMode,
-				initial_capital: btCapital
-			};
-			if (btStart) req.period_start = btStart;
-			if (btEnd) req.period_end = btEnd;
-			const res = await runBacktest(req as any);
-			btMessage = res.message;
-		} catch (e) {
-			btError = e instanceof Error ? e.message : String(e);
-		} finally {
-			btLoading = false;
-		}
 	}
 
 	function statusBadgeClass(status: string): string {
@@ -239,96 +207,7 @@
 		{/if}
 	</section>
 
-	<!-- Section 3: Backtest -->
-	<section
-		class="rounded-lg border p-5"
-		style="background-color: var(--bg-secondary); border-color: var(--border-color);"
-	>
-		<h2 class="mb-4 text-lg font-semibold" style="color: var(--text-primary);">回測操作</h2>
-		<div class="grid grid-cols-2 gap-4 md:grid-cols-3">
-			<div>
-				<label class="mb-1 block text-xs" style="color: var(--text-secondary);">模型類型</label>
-				<select
-					bind:value={btModelType}
-					class="w-full rounded border px-3 py-2 text-sm"
-					style="background-color: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);"
-				>
-					<option value="ensemble">Ensemble</option>
-					<option value="ridge">Ridge</option>
-					<option value="xgboost">XGBoost</option>
-					<option value="random_forest">Random Forest</option>
-					<option value="lightgbm">LightGBM</option>
-				</select>
-			</div>
-			<div>
-				<label class="mb-1 block text-xs" style="color: var(--text-secondary);">回測模式</label>
-				<select
-					bind:value={btMode}
-					class="w-full rounded border px-3 py-2 text-sm"
-					style="background-color: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);"
-				>
-					<option value="run">靜態回測</option>
-					<option value="walk_forward">Walk Forward</option>
-				</select>
-			</div>
-			<div>
-				<label class="mb-1 block text-xs" style="color: var(--text-secondary);">初始資金</label>
-				<input
-					type="number"
-					bind:value={btCapital}
-					class="w-full rounded border px-3 py-2 text-sm"
-					style="background-color: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);"
-				/>
-			</div>
-			<div>
-				<label class="mb-1 block text-xs" style="color: var(--text-secondary);">起始日期</label>
-				<input
-					type="date"
-					bind:value={btStart}
-					class="w-full rounded border px-3 py-2 text-sm"
-					style="background-color: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);"
-				/>
-			</div>
-			<div>
-				<label class="mb-1 block text-xs" style="color: var(--text-secondary);">結束日期</label>
-				<input
-					type="date"
-					bind:value={btEnd}
-					class="w-full rounded border px-3 py-2 text-sm"
-					style="background-color: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);"
-				/>
-			</div>
-			<div class="flex items-end">
-				<button
-					onclick={handleRunBacktest}
-					disabled={btLoading}
-					class="rounded px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
-					style="background-color: var(--color-accent);"
-				>
-					{#if btLoading}
-						<span class="inline-flex items-center gap-2">
-							<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-							</svg>
-							執行中...
-						</span>
-					{:else}
-						執行回測
-					{/if}
-				</button>
-			</div>
-		</div>
-
-		{#if btMessage}
-			<p class="mt-3 text-sm" style="color: var(--color-success);">{btMessage}</p>
-		{/if}
-		{#if btError}
-			<p class="mt-3 text-sm" style="color: var(--color-danger);">{btError}</p>
-		{/if}
-	</section>
-
-	<!-- Section 4: Pipeline history -->
+	<!-- Section 3: Pipeline history -->
 	<section
 		class="rounded-lg border p-5"
 		style="background-color: var(--bg-secondary); border-color: var(--border-color);"

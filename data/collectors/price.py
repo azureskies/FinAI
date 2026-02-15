@@ -91,29 +91,74 @@ class PriceCollector:
         end: str,
         *,
         market: str = "twse",
+        market_map: Optional[dict[str, str]] = None,
     ) -> dict[str, pd.DataFrame]:
-        """Fetch price data for multiple stocks with rate limiting.
+        """Fetch price data for multiple stocks using yfinance batch download.
 
-        Individual failures are logged and skipped.
+        Args:
+            market_map: Optional {stock_id: "twse"|"otc"} mapping. If provided,
+                        overrides the market parameter per stock.
 
         Returns:
             Mapping of stock_id -> DataFrame for successful fetches.
         """
         results: dict[str, pd.DataFrame] = {}
-        total = len(stock_ids)
 
-        for idx, sid in enumerate(stock_ids, 1):
-            logger.info("Batch progress: {}/{}", idx, total)
-            df = self.fetch(sid, start, end, market=market)
-            if df is not None and not df.empty:
-                results[sid] = df
+        # Build ticker list with correct suffixes
+        ticker_to_sid: dict[str, str] = {}
+        for sid in stock_ids:
+            mkt = (market_map or {}).get(sid, market)
+            ticker = self._build_ticker(sid, mkt)
+            ticker_to_sid[ticker] = sid
 
-            # Rate limiting between requests
-            if idx < total:
+        # Download in batches to avoid overloading yfinance
+        batch_size = 50
+        tickers = list(ticker_to_sid.keys())
+        total_batches = (len(tickers) + batch_size - 1) // batch_size
+
+        for i in range(0, len(tickers), batch_size):
+            batch = tickers[i : i + batch_size]
+            batch_num = i // batch_size + 1
+            logger.info("Batch download {}/{}: {} tickers", batch_num, total_batches, len(batch))
+
+            try:
+                data = yf.download(
+                    batch, start=start, end=end, auto_adjust=False,
+                    progress=False, group_by="ticker", threads=True,
+                )
+            except Exception as e:
+                logger.error("Batch download failed: {}", e)
                 time.sleep(self.rate_limit)
+                continue
+
+            if data is None or data.empty:
+                logger.warning("Batch returned empty data")
+                time.sleep(self.rate_limit)
+                continue
+
+            # Extract individual stock data
+            for ticker in batch:
+                sid = ticker_to_sid[ticker]
+                try:
+                    if len(batch) == 1:
+                        stock_data = data
+                    else:
+                        stock_data = data[ticker] if ticker in data.columns.get_level_values(0) else pd.DataFrame()
+
+                    if stock_data is not None and not stock_data.empty:
+                        stock_data = stock_data.dropna(how="all")
+                        if not stock_data.empty:
+                            df = self._normalize(stock_data, sid)
+                            df = self._validate(df, sid)
+                            if not df.empty:
+                                results[sid] = df
+                except Exception as e:
+                    logger.debug("{}: failed to extract from batch — {}", sid, e)
+
+            time.sleep(self.rate_limit)
 
         logger.info(
-            "Batch complete: {}/{} stocks fetched successfully", len(results), total
+            "Batch complete: {}/{} stocks fetched successfully", len(results), len(stock_ids)
         )
         return results
 

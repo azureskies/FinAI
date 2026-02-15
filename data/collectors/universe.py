@@ -71,20 +71,32 @@ class UniverseCollector:
 
         logger.info("Total stocks fetched: {}", len(stock_list))
 
-        # Step 2: Filter by listing age
-        cutoff_date = as_of - timedelta(days=self.min_listing_years * 365)
+        # Step 2: Filter by listing age (only if listing_date is available)
         if "listing_date" in stock_list.columns:
             stock_list["listing_date"] = pd.to_datetime(
                 stock_list["listing_date"], errors="coerce"
             )
-            before = len(stock_list)
-            stock_list = stock_list[stock_list["listing_date"] <= pd.Timestamp(cutoff_date)]
-            logger.info(
-                "After listing age filter (>= {} years): {} -> {}",
-                self.min_listing_years,
-                before,
-                len(stock_list),
-            )
+            has_date = stock_list["listing_date"].notna()
+            if has_date.sum() > len(stock_list) * 0.5:
+                # Majority have valid listing dates — apply filter
+                cutoff_date = as_of - timedelta(days=self.min_listing_years * 365)
+                before = len(stock_list)
+                stock_list = stock_list[
+                    stock_list["listing_date"].isna()
+                    | (stock_list["listing_date"] <= pd.Timestamp(cutoff_date))
+                ]
+                logger.info(
+                    "After listing age filter (>= {} years): {} -> {}",
+                    self.min_listing_years,
+                    before,
+                    len(stock_list),
+                )
+            else:
+                logger.info(
+                    "Skipping listing age filter — only {}/{} stocks have valid dates",
+                    has_date.sum(),
+                    len(stock_list),
+                )
 
         # Step 3: Exclude special categories
         stock_list = self._exclude_categories(stock_list)
@@ -145,37 +157,110 @@ class UniverseCollector:
         return pd.DataFrame(data)
 
     def _fetch_stock_list(self) -> Optional[pd.DataFrame]:
-        """Fetch the list of all TWSE and OTC stocks from FinMind."""
-        logger.debug("Fetching TWSE stock list")
+        """Fetch all TWSE and OTC stocks. Tries FinMind first, falls back to TWSE/TPEX OpenAPI."""
+        # Try FinMind first
+        df = self._fetch_stock_list_finmind()
+        if df is not None and not df.empty:
+            return df
+
+        # Fallback to TWSE/TPEX public API (no token required)
+        logger.info("FinMind unavailable, falling back to TWSE/TPEX OpenAPI")
+        return self._fetch_stock_list_twse()
+
+    def _fetch_stock_list_finmind(self) -> Optional[pd.DataFrame]:
+        """Fetch stock list from FinMind API."""
+        logger.debug("Fetching stock list from FinMind")
         twse = self._finmind_request("TaiwanStockInfo", {})
         time.sleep(self.rate_limit)
 
         if twse is None:
             return None
 
-        # Normalize columns
         col_map = {
             "stock_id": "stock_id",
             "stock_name": "stock_name",
             "type": "market",
-            "date": "listing_date",
         }
         df = twse.rename(
             columns={k: v for k, v in col_map.items() if k in twse.columns}
         )
 
-        # Normalize market type
+        # FinMind's 'date' field is the data update date, NOT listing date.
+        # Drop it to avoid confusion; listing_date will be empty.
+        if "date" in df.columns:
+            df = df.drop(columns=["date"])
+
         if "market" in df.columns:
             df["market"] = df["market"].map(
                 lambda x: "twse" if "上市" in str(x) or "twse" in str(x).lower()
                 else ("otc" if "上櫃" in str(x) or "otc" in str(x).lower() else str(x))
             )
 
-        # Keep only common stocks (filter out ETFs, warrants, etc.)
+        # Keep only common stocks (4-digit numeric stock_id)
         if "stock_id" in df.columns:
             df = df[df["stock_id"].str.match(r"^\d{4}$", na=False)]
 
+        # Deduplicate — keep first occurrence per stock_id
+        df = df.drop_duplicates(subset=["stock_id"], keep="first")
+
+        # Add empty listing_date column for consistency
+        if "listing_date" not in df.columns:
+            df["listing_date"] = ""
+
         return df
+
+    def _fetch_stock_list_twse(self) -> Optional[pd.DataFrame]:
+        """Fetch stock list from TWSE/TPEX public OpenAPI (no token needed)."""
+        rows: list[dict] = []
+
+        # TWSE listed stocks
+        try:
+            resp = requests.get(
+                "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+                timeout=30,
+            )
+            resp.raise_for_status()
+            for item in resp.json():
+                sid = item.get("公司代號", "").strip()
+                if len(sid) == 4 and sid.isdigit():
+                    rows.append({
+                        "stock_id": sid,
+                        "stock_name": item.get("公司簡稱", "").strip(),
+                        "market": "twse",
+                        "listing_date": item.get("上市日期", ""),
+                    })
+            logger.info("TWSE OpenAPI: fetched {} listed stocks", len(rows))
+        except requests.RequestException as e:
+            logger.error("TWSE OpenAPI failed: {}", e)
+
+        time.sleep(0.5)
+
+        # TPEX (OTC) stocks
+        otc_count = 0
+        try:
+            resp = requests.get(
+                "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis",
+                timeout=30,
+            )
+            resp.raise_for_status()
+            for item in resp.json():
+                sid = item.get("SecuritiesCompanyCode", "").strip()
+                if len(sid) == 4 and sid.isdigit():
+                    rows.append({
+                        "stock_id": sid,
+                        "stock_name": item.get("CompanyName", "").strip(),
+                        "market": "otc",
+                        "listing_date": "",
+                    })
+                    otc_count += 1
+            logger.info("TPEX OpenAPI: fetched {} OTC stocks", otc_count)
+        except requests.RequestException as e:
+            logger.error("TPEX OpenAPI failed: {}", e)
+
+        if not rows:
+            return None
+
+        return pd.DataFrame(rows)
 
     def _fetch_market_cap(self, as_of: date) -> Optional[pd.DataFrame]:
         """Fetch market capitalization data from FinMind."""

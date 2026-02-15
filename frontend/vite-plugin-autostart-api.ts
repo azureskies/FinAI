@@ -47,7 +47,7 @@ export default function autostartApi(): Plugin {
 				console.log('[autostart-api] Backend not detected, starting uvicorn...');
 				child = spawn(
 					'python',
-					['-m', 'uvicorn', 'api.main:app', '--host', '0.0.0.0', '--port', '8000'],
+					['-m', 'uvicorn', 'api.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload'],
 					{
 						cwd: process.cwd().replace(/\/frontend$/, ''),
 						stdio: 'pipe',

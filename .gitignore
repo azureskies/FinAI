@@ -35,6 +35,8 @@ Thumbs.db
 
 # SQLite database
 finai.db
+finai.db-shm
+finai.db-wal
 storage/
 
 # Jupyter
@@ -55,3 +57,9 @@ web/build/
 frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
+
+# Screenshots
+*.png
+
+# Playwright MCP
+.playwright-mcp/

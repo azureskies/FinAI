@@ -11,7 +11,7 @@
 	const navItems = [
 		{ href: '/', label: '儀表板' },
 		{ href: '/stocks', label: '股票列表' },
-		{ href: '/backtest', label: '回測結果' },
+		{ href: '/backtest', label: '回測分析' },
 		{ href: '/models', label: '模型管理' },
 		{ href: '/operations', label: '系統操作' }
 	];

@@ -575,7 +575,7 @@ class SQLiteLoader:
 
     def get_backtest_history(self, limit: int = 10) -> list[dict]:
         cur = self._conn.execute(
-            "SELECT * FROM backtest_results ORDER BY run_date DESC LIMIT ?",
+            "SELECT * FROM backtest_results ORDER BY created_at DESC LIMIT ?",
             (limit,),
         )
         cols = [d[0] for d in cur.description]
@@ -590,6 +590,11 @@ class SQLiteLoader:
                         pass
             rows.append(row)
         return rows
+
+    def delete_backtest(self, result_id: str) -> None:
+        """Delete a backtest result by ID."""
+        self.client.table("backtest_results").delete().eq("id", result_id).execute()
+        logger.info("Deleted backtest result {}", result_id)
 
     # ------------------------------------------------------------------ #
     #  Data discovery
@@ -653,6 +658,13 @@ class SQLiteLoader:
         self._conn.commit()
         logger.info("Upserted {} universe records", total)
         return total
+
+    def get_stock_name_map(self) -> dict[str, str]:
+        """Return {stock_id: stock_name} mapping from stock_universe."""
+        rows = self._conn.execute(
+            "SELECT stock_id, stock_name FROM stock_universe WHERE stock_name IS NOT NULL"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
 
     # ------------------------------------------------------------------ #
     #  Stock scores

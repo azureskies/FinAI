@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,17 @@ from pydantic import BaseModel
 
 from api.dependencies import get_db
 from data.loaders import DatabaseLoader
+
+
+def _safe_float(v: object) -> Optional[float]:
+    """Convert to float, returning None for NaN/inf."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return None if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return None
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -35,6 +47,7 @@ class TopPick(BaseModel):
 
 class ScoredStock(BaseModel):
     stock_id: str
+    stock_name: Optional[str] = None
     composite_score: Optional[float] = None
     momentum_score: Optional[float] = None
     trend_score: Optional[float] = None
@@ -103,7 +116,7 @@ def dashboard_summary(
 
 @router.get("/top-picks", response_model=TopPicksResponse)
 def top_picks(
-    n: int = Query(10, ge=1, le=50, description="Number of top picks to return"),
+    n: int = Query(10, ge=1, le=5000, description="Number of top picks to return"),
     db: Optional[DatabaseLoader] = Depends(get_db),
 ) -> TopPicksResponse:
     """Get top N stocks by latest prediction score."""
@@ -111,6 +124,11 @@ def top_picks(
         return TopPicksResponse(picks=[], message="Supabase not configured")
 
     try:
+        # Load stock name mapping
+        name_map: dict[str, str] = {}
+        if hasattr(db, "get_stock_name_map"):
+            name_map = db.get_stock_name_map()
+
         # Try scores-based ranking first
         if hasattr(db, "get_latest_scores"):
             scores_df = db.get_latest_scores(limit=n)
@@ -126,17 +144,18 @@ def top_picks(
                 picks = [
                     ScoredStock(
                         stock_id=row["stock_id"],
-                        composite_score=row.get("composite_score"),
-                        momentum_score=row.get("momentum_score"),
-                        trend_score=row.get("trend_score"),
-                        volatility_score=row.get("volatility_score"),
-                        volume_score=row.get("volume_score"),
-                        ai_score=row.get("ai_score"),
+                        stock_name=name_map.get(row["stock_id"]),
+                        composite_score=_safe_float(row.get("composite_score")),
+                        momentum_score=_safe_float(row.get("momentum_score")),
+                        trend_score=_safe_float(row.get("trend_score")),
+                        volatility_score=_safe_float(row.get("volatility_score")),
+                        volume_score=_safe_float(row.get("volume_score")),
+                        ai_score=_safe_float(row.get("ai_score")),
                         risk_level=row.get("risk_level"),
-                        max_drawdown=row.get("max_drawdown"),
-                        volatility_ann=row.get("volatility_ann"),
-                        win_rate=row.get("win_rate"),
-                        predicted_return=pred_map.get(row["stock_id"]),
+                        max_drawdown=_safe_float(row.get("max_drawdown")),
+                        volatility_ann=_safe_float(row.get("volatility_ann")),
+                        win_rate=_safe_float(row.get("win_rate")),
+                        predicted_return=_safe_float(pred_map.get(row["stock_id"])),
                         date=str(row.get("date", ""))[:10],
                     )
                     for _, row in scores_df.iterrows()
@@ -152,6 +171,7 @@ def top_picks(
         picks = [
             ScoredStock(
                 stock_id=row["stock_id"],
+                stock_name=name_map.get(row["stock_id"]),
                 predicted_return=row["predicted_return"],
                 composite_score=row.get("score"),
                 date=str(row["date"])[:10],

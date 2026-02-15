@@ -7,6 +7,7 @@
 	import ScoreRadar from '$lib/components/ScoreRadar.svelte';
 	import RiskBadge from '$lib/components/RiskBadge.svelte';
 	import MetricCard from '$lib/components/MetricCard.svelte';
+	import { getIndicator } from '$lib/indicators';
 	import {
 		getStockPrices,
 		getStockFeatures,
@@ -76,13 +77,18 @@
 </script>
 
 <svelte:head>
-	<title>FinAI - {stockId}</title>
+	<title>FinAI - {stockId} {scoreData?.stock_name ?? ''}</title>
 </svelte:head>
 
 <div class="space-y-6">
 	<div class="flex items-center gap-4">
 		<a href="/stocks" class="text-sm hover:underline" style="color: var(--color-accent);">&larr; 返回列表</a>
-		<h1 class="text-2xl font-bold" style="color: var(--text-primary);">{stockId}</h1>
+		<h1 class="text-2xl font-bold" style="color: var(--text-primary);">
+			{stockId}
+			{#if scoreData?.stock_name}
+				<span class="ml-2 text-lg font-normal" style="color: var(--text-secondary);">{scoreData.stock_name}</span>
+			{/if}
+		</h1>
 		{#if scoreData?.risk_level}
 			<RiskBadge level={scoreData.risk_level} />
 		{/if}
@@ -167,11 +173,33 @@
 				{#if featureEntries.length > 0}
 					<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 						{#each featureEntries as [key, val]}
-							<div class="rounded border px-3 py-2" style="border-color: var(--border-color); background-color: var(--bg-tertiary);">
-								<p class="text-xs" style="color: var(--text-secondary);">{key}</p>
-								<p class="font-mono text-sm font-medium" style="color: var(--text-primary);">
+							{@const info = getIndicator(key)}
+							<div
+								class="group relative rounded border px-3 py-2 transition-colors hover:border-blue-500/50"
+								style="border-color: var(--border-color); background-color: var(--bg-tertiary);"
+							>
+								<div class="flex items-center justify-between">
+									<p class="text-xs font-medium" style="color: var(--text-secondary);">{info.name}</p>
+									<p class="text-[10px] opacity-50" style="color: var(--text-secondary);">{key}</p>
+								</div>
+								<p class="mt-1 font-mono text-sm font-semibold" style="color: var(--text-primary);">
 									{typeof val === 'number' ? val.toFixed(4) : val}
 								</p>
+
+								<!-- Tooltip on hover -->
+								<div
+									class="pointer-events-none absolute bottom-full left-0 z-10 mb-2 hidden w-48 rounded bg-gray-900 p-2 text-xs text-white shadow-xl group-hover:block"
+								>
+									<p class="font-bold text-blue-400">{info.name}</p>
+									<p class="mt-1 leading-relaxed opacity-90">{info.description}</p>
+									<div class="mt-2 border-t border-gray-700 pt-1">
+										<p class="text-green-400">💡 怎麼看：</p>
+										<p class="italic">{info.interpretation}</p>
+									</div>
+									<div
+										class="absolute -bottom-1 left-4 h-2 w-2 rotate-45 bg-gray-900"
+									></div>
+								</div>
 							</div>
 						{/each}
 					</div>

@@ -28,6 +28,19 @@ models:
     random_state: 42
     description: "Primary model 2 - best performance"
 
+  lightgbm:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_samples: 20
+    num_leaves: 31
+    random_state: 42
+    n_jobs: -1
+    verbosity: -1
+    description: "Fast gradient boosting - training speed"
+
   ensemble:
     method: "weighted_average"   # weighted_average | stacking
     weights:

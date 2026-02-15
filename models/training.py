@@ -12,6 +12,7 @@ from scipy.stats import spearmanr
 
 from models.baseline import RidgePredictor
 from models.ensemble import EnsemblePredictor
+from models.lightgbm_model import LightGBMPredictor
 from models.tree_models import RandomForestPredictor, XGBoostPredictor
 
 
@@ -125,6 +126,16 @@ class ModelTrainer:
         ic, _ = spearmanr(y_val, val_preds)
         logger.info(f"XGBoost val IC: {ic:.4f}")
         models["xgboost"] = xgb
+
+        # LightGBM
+        logger.info("Training LightGBM...")
+        lgbm_params = {k: v for k, v in model_cfg["lightgbm"].items() if k != "description"}
+        lgbm = LightGBMPredictor(params=lgbm_params)
+        lgbm.fit(X_train, y_train)
+        val_preds = lgbm.predict(X_val)
+        ic, _ = spearmanr(y_val, val_preds)
+        logger.info(f"LightGBM val IC: {ic:.4f}")
+        models["lightgbm"] = lgbm
 
         # Ensemble
         logger.info("Creating Ensemble...")
