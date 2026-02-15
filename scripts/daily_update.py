@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import date, timedelta
 
@@ -156,13 +157,34 @@ def main() -> None:
         ]
         X = latest_features[feat_cols].fillna(0)
 
-        # Placeholder: in production, load the actual model from storage
-        # For now, use score = mean of standardized features as a simple signal
-        from sklearn.preprocessing import StandardScaler
+        # Load model from Supabase storage or local cache
+        model_path = active_model.get("file_path", "")
+        model = None
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        scores = X_scaled.mean(axis=1)
+        if model_path and db:
+            import tempfile
+            try:
+                local_path = os.path.join(tempfile.gettempdir(), os.path.basename(model_path))
+                if not os.path.exists(local_path):
+                    storage_data = db.client.storage.from_("models").download(model_path)
+                    with open(local_path, "wb") as f:
+                        f.write(storage_data)
+                    logger.info("Downloaded model from storage: {}", model_path)
+                from models.training import ModelTrainer
+                trainer = ModelTrainer()
+                model = trainer.load_model(local_path)
+                logger.info("Loaded model: {}", type(model).__name__)
+            except Exception as e:
+                logger.warning("Failed to load model from storage: {}", e)
+
+        if model is not None and hasattr(model, "predict"):
+            scores = model.predict(X)
+        else:
+            logger.warning("Model not available, falling back to standardized feature mean")
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            scores = X_scaled.mean(axis=1)
 
         for idx, (_, row) in enumerate(latest_features.iterrows()):
             predictions_list.append({

@@ -79,7 +79,7 @@ class DataCleaner:
         if n_over > 0:
             report["issues"]["over_daily_limit"] = {
                 "count": n_over,
-                "dates": df.index[over_limit].strftime("%Y-%m-%d").tolist(),
+                "dates": [str(d)[:10] for d in df.index[over_limit]],
             }
             logger.warning("{} rows exceed ±{}% daily change limit", n_over, self._DAILY_LIMIT * 100)
 
