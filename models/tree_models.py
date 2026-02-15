@@ -80,7 +80,11 @@ class RandomForestPredictor:
         return importance_df.sort_values("importance", ascending=False).reset_index(drop=True)
 
     def optimize_hyperparameters(
-        self, X: pd.DataFrame, y: pd.Series, n_trials: int = 50
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_trials: int = 50,
+        timeout: Optional[int] = None,
     ) -> dict:
         """Use Optuna for hyperparameter tuning with TimeSeriesSplit.
 
@@ -88,6 +92,7 @@ class RandomForestPredictor:
             X: Feature matrix.
             y: Target values.
             n_trials: Number of Optuna trials.
+            timeout: Maximum optimization time in seconds (None = no limit).
 
         Returns:
             Best hyperparameters dict.
@@ -122,7 +127,7 @@ class RandomForestPredictor:
 
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=n_trials)
+        study.optimize(objective, n_trials=n_trials, timeout=timeout)
 
         best_params = study.best_params
         logger.info(f"RF best IC: {study.best_value:.4f}, params: {best_params}")
@@ -202,7 +207,11 @@ class XGBoostPredictor:
         return importance_df.sort_values("importance", ascending=False).reset_index(drop=True)
 
     def optimize_hyperparameters(
-        self, X: pd.DataFrame, y: pd.Series, n_trials: int = 50
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_trials: int = 50,
+        timeout: Optional[int] = None,
     ) -> dict:
         """Use Optuna with TimeSeriesSplit cross-validation.
 
@@ -210,6 +219,7 @@ class XGBoostPredictor:
             X: Feature matrix.
             y: Target values.
             n_trials: Number of Optuna trials.
+            timeout: Maximum optimization time in seconds (None = no limit).
 
         Returns:
             Best hyperparameters dict.
@@ -243,7 +253,7 @@ class XGBoostPredictor:
 
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=n_trials)
+        study.optimize(objective, n_trials=n_trials, timeout=timeout)
 
         best_params = study.best_params
         logger.info(f"XGBoost best IC: {study.best_value:.4f}, params: {best_params}")

@@ -1,0 +1,32 @@
+# Monitoring & Alerting Configuration
+
+# Thresholds for health checks
+thresholds:
+  max_data_age_hours: 48      # Max hours since last price data
+  min_ic: 0.0                 # Minimum acceptable IC for active model
+  max_missing_rate: 0.05      # Max NaN rate in features (5%)
+
+# Which health checks to run
+enabled_checks:
+  - data_freshness
+  - model_health
+  - prediction_coverage
+  - feature_completeness
+
+# Alert channels
+alert_channels:
+  email:
+    enabled: false
+    type: email
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    username: "${ALERT_EMAIL_USER}"
+    password: "${ALERT_EMAIL_PASSWORD}"
+    from_addr: "${ALERT_EMAIL_USER}"
+    to_addrs:
+      - "admin@example.com"
+
+  webhook:
+    enabled: false
+    type: webhook
+    url: "${ALERT_WEBHOOK_URL}"

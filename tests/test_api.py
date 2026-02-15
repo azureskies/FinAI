@@ -222,12 +222,56 @@ class TestBacktest:
         assert resp.status_code == 200
         assert resp.json()["status"] == "accepted"
 
+    def test_run_backtest_walk_forward(self, client):
+        resp = client.post(
+            "/api/backtest/run",
+            json={
+                "model_type": "ensemble",
+                "mode": "walk_forward",
+                "period_start": "2023-01-01",
+                "period_end": "2024-01-01",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "accepted"
+        assert "ensemble" in data["message"]
+
+    def test_run_backtest_with_capital(self, client):
+        resp = client.post(
+            "/api/backtest/run",
+            json={
+                "model_type": "ridge",
+                "initial_capital": 5_000_000,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "accepted"
+
     def test_run_backtest_no_db(self, client_no_db):
         resp = client_no_db.post(
             "/api/backtest/run", json={"model_type": "ensemble"}
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "error"
+
+    def test_run_backtest_invalid_mode(self, client):
+        resp = client.post(
+            "/api/backtest/run",
+            json={"model_type": "ensemble", "mode": "invalid"},
+        )
+        assert resp.status_code == 422
+
+    @patch("api.routers.backtest._execute_backtest")
+    def test_execute_backtest_called(self, mock_exec, client):
+        resp = client.post(
+            "/api/backtest/run",
+            json={"model_type": "xgboost", "mode": "run"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "accepted"
+        # Background task was scheduled (TestClient runs them synchronously)
+        mock_exec.assert_called_once()
 
 
 # ------------------------------------------------------------------ #

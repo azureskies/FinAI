@@ -94,6 +94,26 @@ CREATE INDEX IF NOT EXISTS idx_backtest_date
     ON backtest_results (run_date DESC);
 
 -- =============================================================
+-- Pipeline Runs (monitoring)
+-- =============================================================
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    pipeline_name   VARCHAR(50)  NOT NULL,
+    start_time      TIMESTAMPTZ  NOT NULL,
+    end_time        TIMESTAMPTZ,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'running',
+    metrics         JSONB,
+    error           TEXT,
+    metadata        JSONB,
+    created_at      TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_name_time
+    ON pipeline_runs (pipeline_name, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status
+    ON pipeline_runs (status);
+
+-- =============================================================
 -- Supabase Storage bucket (run via dashboard or API)
 -- =============================================================
 -- INSERT INTO storage.buckets (id, name, public)

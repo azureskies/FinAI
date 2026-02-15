@@ -47,6 +47,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Target date (default: today), format YYYY-MM-DD",
     )
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        default=True,
+        help="Send alerts on completion/failure (default: True)",
+    )
+    parser.add_argument(
+        "--no-notify",
+        dest="notify",
+        action="store_false",
+        help="Disable alert notifications",
+    )
     return parser.parse_args()
 
 
@@ -83,161 +95,208 @@ def main() -> None:
     feature_engine = FeatureEngine()
     db = None if args.dry_run else SupabaseLoader()
 
+    # Pipeline tracking and alerting
+    tracker = None
+    alert_mgr = None
+    run_id = None
+
+    if db and not args.dry_run:
+        from monitoring.alerts import AlertLevel, AlertManager
+        from monitoring.tracker import PipelineTracker
+
+        tracker = PipelineTracker(db)
+        alert_mgr = AlertManager() if args.notify else None
+        run_id = tracker.start_run(
+            "daily_update", metadata={"target_date": target_date}
+        )
+
     stock_ids = _load_universe(args.stock_id)
     logger.info("Processing {} stocks", len(stock_ids))
 
-    # ------------------------------------------------------------------ #
-    # 1. Fetch latest price data
-    # ------------------------------------------------------------------ #
-    logger.info("Step 1: Fetching price data...")
-    price_data = collector.fetch_batch(stock_ids, start_date, target_date)
-    logger.info("Fetched price data for {}/{} stocks", len(price_data), len(stock_ids))
+    try:
+        # -------------------------------------------------------------- #
+        # 1. Fetch latest price data
+        # -------------------------------------------------------------- #
+        logger.info("Step 1: Fetching price data...")
+        price_data = collector.fetch_batch(stock_ids, start_date, target_date)
+        logger.info("Fetched price data for {}/{} stocks", len(price_data), len(stock_ids))
 
-    if not price_data:
-        logger.error("No price data fetched — aborting")
-        sys.exit(1)
+        if not price_data:
+            raise RuntimeError("No price data fetched")
 
-    # ------------------------------------------------------------------ #
-    # 2. Data quality checks
-    # ------------------------------------------------------------------ #
-    logger.info("Step 2: Running data quality checks...")
-    valid_stocks: dict[str, pd.DataFrame] = {}
-    for sid, df in price_data.items():
-        if df.empty:
-            logger.warning("{}: empty DataFrame, skipping", sid)
-            continue
-        missing_rate = df[["close"]].isna().mean().iloc[0]
-        if missing_rate > 0.1:
-            logger.warning("{}: too many missing values ({:.1%}), skipping", sid, missing_rate)
-            continue
-        valid_stocks[sid] = df
+        # -------------------------------------------------------------- #
+        # 2. Data quality checks
+        # -------------------------------------------------------------- #
+        logger.info("Step 2: Running data quality checks...")
+        valid_stocks: dict[str, pd.DataFrame] = {}
+        for sid, df in price_data.items():
+            if df.empty:
+                logger.warning("{}: empty DataFrame, skipping", sid)
+                continue
+            missing_rate = df[["close"]].isna().mean().iloc[0]
+            if missing_rate > 0.1:
+                logger.warning("{}: too many missing values ({:.1%}), skipping", sid, missing_rate)
+                continue
+            valid_stocks[sid] = df
 
-    logger.info("Quality check passed: {}/{} stocks", len(valid_stocks), len(price_data))
+        logger.info("Quality check passed: {}/{} stocks", len(valid_stocks), len(price_data))
 
-    # ------------------------------------------------------------------ #
-    # 3. Compute features
-    # ------------------------------------------------------------------ #
-    logger.info("Step 3: Computing features...")
-    all_features: list[pd.DataFrame] = []
-    for sid, df in valid_stocks.items():
-        try:
-            feats = feature_engine.compute_all(df)
-            feats["stock_id"] = sid
-            feats.index.name = "date"
-            all_features.append(feats.reset_index())
-        except Exception as e:
-            logger.error("{}: feature computation failed — {}", sid, e)
-
-    if not all_features:
-        logger.error("No features computed — aborting")
-        sys.exit(1)
-
-    features_df = pd.concat(all_features, ignore_index=True)
-    logger.info("Computed features: {} rows, {} columns", *features_df.shape)
-
-    # ------------------------------------------------------------------ #
-    # 4. Load active model and generate predictions
-    # ------------------------------------------------------------------ #
-    logger.info("Step 4: Generating predictions...")
-    predictions_list: list[dict] = []
-    active_model = None
-    model_version_id = None
-
-    if db:
-        active_model = db.get_active_model("ensemble")
-        if active_model:
-            model_version_id = active_model["id"]
-
-    if active_model:
-        logger.info("Active model: {} ({})", active_model["model_type"], model_version_id)
-        # Use the latest row per stock for prediction
-        latest_features = features_df.sort_values("date").groupby("stock_id").tail(1)
-        feat_cols = [
-            c for c in latest_features.columns if c not in {"date", "stock_id"}
-        ]
-        X = latest_features[feat_cols].fillna(0)
-
-        # Load model from Supabase storage or local cache
-        model_path = active_model.get("file_path", "")
-        model = None
-
-        if model_path and db:
-            import tempfile
-            try:
-                local_path = os.path.join(tempfile.gettempdir(), os.path.basename(model_path))
-                if not os.path.exists(local_path):
-                    storage_data = db.client.storage.from_("models").download(model_path)
-                    with open(local_path, "wb") as f:
-                        f.write(storage_data)
-                    logger.info("Downloaded model from storage: {}", model_path)
-                from models.training import ModelTrainer
-                trainer = ModelTrainer()
-                model = trainer.load_model(local_path)
-                logger.info("Loaded model: {}", type(model).__name__)
-            except Exception as e:
-                logger.warning("Failed to load model from storage: {}", e)
-
-        if model is not None and hasattr(model, "predict"):
-            scores = model.predict(X)
-        else:
-            logger.warning("Model not available, falling back to standardized feature mean")
-            from sklearn.preprocessing import StandardScaler
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-            scores = X_scaled.mean(axis=1)
-
-        for idx, (_, row) in enumerate(latest_features.iterrows()):
-            predictions_list.append({
-                "date": target_date,
-                "stock_id": row["stock_id"],
-                "predicted_return": float(scores[idx]),
-                "score": float(scores[idx]),
-                "model_version": model_version_id,
-            })
-    else:
-        logger.warning("No active model found — skipping predictions")
-
-    # ------------------------------------------------------------------ #
-    # 5. Save everything to Supabase
-    # ------------------------------------------------------------------ #
-    if args.dry_run:
-        logger.info("[DRY RUN] Would save {} price dfs, {} feature rows, {} predictions",
-                     len(valid_stocks), len(features_df), len(predictions_list))
-    else:
-        logger.info("Step 5: Saving to Supabase...")
-
-        # Save prices
+        # -------------------------------------------------------------- #
+        # 3. Compute features
+        # -------------------------------------------------------------- #
+        logger.info("Step 3: Computing features...")
+        all_features: list[pd.DataFrame] = []
         for sid, df in valid_stocks.items():
             try:
-                price_df = df.reset_index()
-                if "stock_id" not in price_df.columns:
-                    price_df["stock_id"] = sid
-                db.upsert_prices(price_df)
+                feats = feature_engine.compute_all(df)
+                feats["stock_id"] = sid
+                feats.index.name = "date"
+                all_features.append(feats.reset_index())
             except Exception as e:
-                logger.error("{}: failed to save prices — {}", sid, e)
+                logger.error("{}: feature computation failed — {}", sid, e)
 
-        # Save features
-        try:
-            db.upsert_features(features_df)
-        except Exception as e:
-            logger.error("Failed to save features: {}", e)
+        if not all_features:
+            raise RuntimeError("No features computed")
 
-        # Save predictions
-        if predictions_list:
+        features_df = pd.concat(all_features, ignore_index=True)
+        logger.info("Computed features: {} rows, {} columns", *features_df.shape)
+
+        # -------------------------------------------------------------- #
+        # 4. Load active model and generate predictions
+        # -------------------------------------------------------------- #
+        logger.info("Step 4: Generating predictions...")
+        predictions_list: list[dict] = []
+        active_model = None
+        model_version_id = None
+
+        if db:
+            active_model = db.get_active_model("ensemble")
+            if active_model:
+                model_version_id = active_model["id"]
+
+        if active_model:
+            logger.info("Active model: {} ({})", active_model["model_type"], model_version_id)
+            # Use the latest row per stock for prediction
+            latest_features = features_df.sort_values("date").groupby("stock_id").tail(1)
+            feat_cols = [
+                c for c in latest_features.columns if c not in {"date", "stock_id"}
+            ]
+            X = latest_features[feat_cols].fillna(0)
+
+            # Load model from Supabase storage or local cache
+            model_path = active_model.get("file_path", "")
+            model = None
+
+            if model_path and db:
+                import tempfile
+                try:
+                    local_path = os.path.join(tempfile.gettempdir(), os.path.basename(model_path))
+                    if not os.path.exists(local_path):
+                        storage_data = db.client.storage.from_("models").download(model_path)
+                        with open(local_path, "wb") as f:
+                            f.write(storage_data)
+                        logger.info("Downloaded model from storage: {}", model_path)
+                    from models.training import ModelTrainer
+                    trainer = ModelTrainer()
+                    model = trainer.load_model(local_path)
+                    logger.info("Loaded model: {}", type(model).__name__)
+                except Exception as e:
+                    logger.warning("Failed to load model from storage: {}", e)
+
+            if model is not None and hasattr(model, "predict"):
+                scores = model.predict(X)
+            else:
+                logger.warning("Model not available, falling back to standardized feature mean")
+                from sklearn.preprocessing import StandardScaler
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X)
+                scores = X_scaled.mean(axis=1)
+
+            for idx, (_, row) in enumerate(latest_features.iterrows()):
+                predictions_list.append({
+                    "date": target_date,
+                    "stock_id": row["stock_id"],
+                    "predicted_return": float(scores[idx]),
+                    "score": float(scores[idx]),
+                    "model_version": model_version_id,
+                })
+        else:
+            logger.warning("No active model found — skipping predictions")
+
+        # -------------------------------------------------------------- #
+        # 5. Save everything to Supabase
+        # -------------------------------------------------------------- #
+        if args.dry_run:
+            logger.info("[DRY RUN] Would save {} price dfs, {} feature rows, {} predictions",
+                         len(valid_stocks), len(features_df), len(predictions_list))
+        else:
+            logger.info("Step 5: Saving to Supabase...")
+
+            # Save prices
+            for sid, df in valid_stocks.items():
+                try:
+                    price_df = df.reset_index()
+                    if "stock_id" not in price_df.columns:
+                        price_df["stock_id"] = sid
+                    db.upsert_prices(price_df)
+                except Exception as e:
+                    logger.error("{}: failed to save prices — {}", sid, e)
+
+            # Save features
             try:
-                pred_df = pd.DataFrame(predictions_list)
-                db.save_predictions(pred_df)
+                db.upsert_features(features_df)
             except Exception as e:
-                logger.error("Failed to save predictions: {}", e)
+                logger.error("Failed to save features: {}", e)
 
-    # ------------------------------------------------------------------ #
-    # 6. Log summary
-    # ------------------------------------------------------------------ #
-    logger.info("=== Daily Update Summary ===")
-    logger.info("Stocks processed: {}/{}", len(valid_stocks), len(stock_ids))
-    logger.info("Feature rows: {}", len(features_df))
-    logger.info("Predictions: {}", len(predictions_list))
-    logger.info("Pipeline completed successfully")
+            # Save predictions
+            if predictions_list:
+                try:
+                    pred_df = pd.DataFrame(predictions_list)
+                    db.save_predictions(pred_df)
+                except Exception as e:
+                    logger.error("Failed to save predictions: {}", e)
+
+        # -------------------------------------------------------------- #
+        # 6. Log summary and record success
+        # -------------------------------------------------------------- #
+        summary = {
+            "stocks_processed": len(valid_stocks),
+            "stocks_total": len(stock_ids),
+            "feature_rows": len(features_df),
+            "predictions": len(predictions_list),
+        }
+        logger.info("=== Daily Update Summary ===")
+        logger.info("Stocks processed: {}/{}", len(valid_stocks), len(stock_ids))
+        logger.info("Feature rows: {}", len(features_df))
+        logger.info("Predictions: {}", len(predictions_list))
+        logger.info("Pipeline completed successfully")
+
+        if tracker and run_id:
+            tracker.finish_run(run_id, status="success", metrics=summary)
+        if alert_mgr:
+            from monitoring.alerts import AlertLevel
+            alert_mgr.send_alert(
+                level=AlertLevel.INFO,
+                title="Daily update completed",
+                message=(
+                    f"Stocks: {len(valid_stocks)}/{len(stock_ids)}, "
+                    f"Features: {len(features_df)} rows, "
+                    f"Predictions: {len(predictions_list)}"
+                ),
+            )
+
+    except Exception as exc:
+        logger.error("Daily update pipeline failed: {}", exc)
+        if tracker and run_id:
+            tracker.finish_run(run_id, status="failed", error=str(exc))
+        if alert_mgr:
+            from monitoring.alerts import AlertLevel
+            alert_mgr.send_alert(
+                level=AlertLevel.CRITICAL,
+                title="Daily update FAILED",
+                message=str(exc),
+            )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

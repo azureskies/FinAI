@@ -7,6 +7,7 @@ Usage:
     python -m scripts.weekly_retrain
     python -m scripts.weekly_retrain --dry-run
     python -m scripts.weekly_retrain --model-type xgboost
+    python -m scripts.weekly_retrain --optimize
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from sklearn.linear_model import Ridge
 
 from data.loaders.supabase import SupabaseLoader
 from data.processors.features import FeatureEngine
+from models.tree_models import RandomForestPredictor, XGBoostPredictor
 
 _MODEL_PARAMS_PATH = "configs/model_params.yaml"
 _IC_IMPROVEMENT_THRESHOLD = 0.05  # 5% relative improvement to promote
@@ -46,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Train only a specific model type (ridge, random_forest, xgboost, ensemble)",
+    )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Enable Optuna hyperparameter tuning before training",
     )
     return parser.parse_args()
 
@@ -126,6 +133,40 @@ def main() -> None:
     logger.info("Step 1: Loading historical data...")
     db = SupabaseLoader()
 
+    # Pipeline tracking and alerting
+    tracker = None
+    alert_mgr = None
+    run_id = None
+
+    if not args.dry_run:
+        from monitoring.alerts import AlertLevel, AlertManager
+        from monitoring.tracker import PipelineTracker
+
+        tracker = PipelineTracker(db)
+        alert_mgr = AlertManager()
+        run_id = tracker.start_run(
+            "weekly_retrain",
+            metadata={"optimize": args.optimize, "model_type": args.model_type},
+        )
+
+    try:
+        _run_retrain_pipeline(args, params, db, tracker, alert_mgr, run_id)
+    except Exception as exc:
+        logger.error("Weekly retrain pipeline failed: {}", exc)
+        if tracker and run_id:
+            tracker.finish_run(run_id, status="failed", error=str(exc))
+        if alert_mgr:
+            from monitoring.alerts import AlertLevel
+            alert_mgr.send_alert(
+                level=AlertLevel.CRITICAL,
+                title="Weekly retrain FAILED",
+                message=str(exc),
+            )
+        sys.exit(1)
+
+
+def _run_retrain_pipeline(args, params, db, tracker, alert_mgr, run_id) -> None:
+    """Core retrain pipeline logic, extracted for error handling."""
     training_cfg = params.get("training", {}).get("time_split", {})
     train_start = training_cfg.get("train_start", "2018-01-01")
     test_end = training_cfg.get("test_end", str(date.today()))
@@ -141,14 +182,12 @@ def main() -> None:
 
     features_df = db.get_features(default_universe, train_start, test_end)
     if features_df.empty:
-        logger.error("No feature data found — aborting")
-        sys.exit(1)
+        raise RuntimeError("No feature data found")
     logger.info("Loaded features: {} rows", len(features_df))
 
     prices_df = db.get_prices(default_universe, train_start, test_end)
     if prices_df.empty:
-        logger.error("No price data found — aborting")
-        sys.exit(1)
+        raise RuntimeError("No price data found")
 
     # ------------------------------------------------------------------ #
     # 2. Prepare features and target
@@ -187,13 +226,51 @@ def main() -> None:
     logger.info("Train: {} rows | Validation: {} rows", len(X_train), len(X_val))
 
     if len(X_train) < 100 or len(X_val) < 50:
-        logger.error("Insufficient data for training — aborting")
-        sys.exit(1)
+        raise RuntimeError("Insufficient data for training")
 
     # ------------------------------------------------------------------ #
-    # 3. Train all models
+    # 3. Optuna hyperparameter optimization (optional)
     # ------------------------------------------------------------------ #
-    logger.info("Step 3: Training models...")
+    optuna_cfg = params.get("optuna", {})
+    default_n_trials = optuna_cfg.get("n_trials", 50)
+    default_timeout = optuna_cfg.get("timeout", 3600)
+    # Per-model timeout: divide total timeout among optimizable models
+    per_model_timeout = 600  # 10 minutes per model as reasonable default
+
+    optimized_params: dict[str, dict] = {}  # model_type -> best_params
+
+    if args.optimize:
+        logger.info("Step 3a: Running Optuna hyperparameter optimization...")
+        optimize_targets = {
+            "random_forest": RandomForestPredictor,
+            "xgboost": XGBoostPredictor,
+        }
+        model_types_to_train = (
+            [args.model_type] if args.model_type else ["ridge", "random_forest", "xgboost"]
+        )
+
+        for model_type in model_types_to_train:
+            if model_type not in optimize_targets:
+                continue
+
+            logger.info("Optimizing {} with Optuna (n_trials={}, timeout={}s)...",
+                        model_type, default_n_trials, per_model_timeout)
+            try:
+                predictor = optimize_targets[model_type]()
+                best_params = predictor.optimize_hyperparameters(
+                    X_train, y_train,
+                    n_trials=default_n_trials,
+                    timeout=per_model_timeout,
+                )
+                optimized_params[model_type] = best_params
+                logger.info("{}: Optuna best params: {}", model_type, best_params)
+            except Exception as e:
+                logger.error("{}: Optuna optimization failed — {}", model_type, e)
+
+    # ------------------------------------------------------------------ #
+    # 3b. Train all models
+    # ------------------------------------------------------------------ #
+    logger.info("Step 3b: Training models...")
     model_configs = params.get("models", {})
     model_types_to_train = (
         [args.model_type] if args.model_type else ["ridge", "random_forest", "xgboost"]
@@ -212,8 +289,13 @@ def main() -> None:
             logger.warning("Unknown model type: {}, skipping", model_type)
             continue
 
-        model_params = model_configs.get(model_type, {})
-        logger.info("Training {}...", model_type)
+        # Use optimized params if available, otherwise fall back to config
+        if model_type in optimized_params:
+            model_params = optimized_params[model_type]
+            logger.info("Training {} with Optuna-optimized params...", model_type)
+        else:
+            model_params = model_configs.get(model_type, {})
+            logger.info("Training {} with default params...", model_type)
 
         try:
             model = trainers[model_type](X_train, y_train, model_params)
@@ -234,6 +316,10 @@ def main() -> None:
                 "val_size": len(X_val),
                 "n_features": len(feat_cols),
             }
+            # Store best params in metadata when optimize was used
+            if model_type in optimized_params:
+                metrics["optimized_params"] = optimized_params[model_type]
+
             trained_models[model_type] = (model, metrics)
             logger.info("{}: train_ic={:.4f}, val_ic={:.4f}", model_type, train_ic, val_ic)
 
@@ -308,7 +394,7 @@ def main() -> None:
             promotion_log.append(f"[DRY RUN] {model_type} would be promoted (ic={new_ic:.4f})")
 
     # ------------------------------------------------------------------ #
-    # 7. Log comparison report
+    # 7. Log comparison report and record completion
     # ------------------------------------------------------------------ #
     logger.info("=== Weekly Retrain Summary ===")
     logger.info("Models trained: {}", list(trained_models.keys()))
@@ -321,6 +407,37 @@ def main() -> None:
     else:
         logger.info("No models promoted (no significant improvement)")
     logger.info("Pipeline completed successfully")
+
+    # Record pipeline success
+    summary_metrics = {
+        "models_trained": list(trained_models.keys()),
+        "promotions": promotion_log,
+        "model_ics": {mt: m[1].get("val_ic", 0) for mt, m in trained_models.items()},
+    }
+    if tracker and run_id:
+        tracker.finish_run(run_id, status="success", metrics=summary_metrics)
+
+    if alert_mgr:
+        from monitoring.alerts import AlertLevel
+
+        # Send promotion alert if any models were promoted
+        if promotion_log and not args.dry_run:
+            alert_mgr.send_alert(
+                level=AlertLevel.WARNING,
+                title="Model promoted",
+                message="\n".join(promotion_log),
+            )
+
+        # Send completion summary
+        ic_summary = ", ".join(
+            f"{mt}: IC={m[1].get('val_ic', 0):.4f}"
+            for mt, m in trained_models.items()
+        )
+        alert_mgr.send_alert(
+            level=AlertLevel.INFO,
+            title="Weekly retrain completed",
+            message=f"Models: {ic_summary}. Promotions: {len(promotion_log)}",
+        )
 
 
 if __name__ == "__main__":

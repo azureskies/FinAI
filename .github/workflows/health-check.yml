@@ -1,0 +1,32 @@
+name: Health Check
+
+on:
+  schedule:
+    # 11:00 UTC = 19:00 UTC+8, daily (after daily_update at 18:00)
+    - cron: "0 11 * * 1-5"
+  workflow_dispatch:
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run health checks
+        run: python -m scripts.health_check --alert

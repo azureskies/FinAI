@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import backtest, dashboard, models, stocks
+from api.routers import backtest, dashboard, models, monitoring, stocks
 
 app = FastAPI(
     title="FinAI API",
@@ -27,6 +27,7 @@ app.include_router(stocks.router)
 app.include_router(backtest.router)
 app.include_router(models.router)
 app.include_router(dashboard.router)
+app.include_router(monitoring.router)
 
 
 @app.get("/api/health")

@@ -115,145 +115,193 @@ def main() -> None:
     db = SupabaseLoader()
     collector = PriceCollector()
 
-    # ------------------------------------------------------------------ #
-    # 1. Load predictions and actual returns
-    # ------------------------------------------------------------------ #
-    logger.info("Step 1: Loading predictions and actual prices...")
+    # Pipeline tracking and alerting
+    tracker = None
+    alert_mgr = None
+    run_id = None
 
-    # Get all predictions in the month range
-    predictions_resp = (
-        db.client.table("predictions")
-        .select("date, stock_id, predicted_return, score, model_version")
-        .gte("date", start_date)
-        .lte("date", end_date)
-        .order("date")
-        .execute()
-    )
-    if not predictions_resp.data:
-        logger.warning("No predictions found for this period")
-        sys.exit(0)
+    if not args.dry_run:
+        from monitoring.alerts import AlertLevel, AlertManager
+        from monitoring.tracker import PipelineTracker
 
-    preds_df = pd.DataFrame(predictions_resp.data)
-    preds_df["date"] = pd.to_datetime(preds_df["date"])
-    stock_ids = preds_df["stock_id"].unique().tolist()
+        tracker = PipelineTracker(db)
+        alert_mgr = AlertManager()
+        run_id = tracker.start_run(
+            "monthly_report", metadata={"period": f"{start_date}~{end_date}"}
+        )
 
-    # Get actual prices for the period (plus buffer for forward returns)
-    buffer_end = str(date.fromisoformat(end_date) + timedelta(days=10))
-    prices_df = db.get_prices(stock_ids, start_date, buffer_end)
+    try:
+        # -------------------------------------------------------------- #
+        # 1. Load predictions and actual returns
+        # -------------------------------------------------------------- #
+        logger.info("Step 1: Loading predictions and actual prices...")
 
-    if prices_df.empty:
-        logger.warning("No price data found for prediction stocks")
-        sys.exit(0)
+        # Get all predictions in the month range
+        predictions_resp = (
+            db.client.table("predictions")
+            .select("date, stock_id, predicted_return, score, model_version")
+            .gte("date", start_date)
+            .lte("date", end_date)
+            .order("date")
+            .execute()
+        )
+        if not predictions_resp.data:
+            logger.warning("No predictions found for this period")
+            sys.exit(0)
 
-    # ------------------------------------------------------------------ #
-    # 2. Calculate performance metrics
-    # ------------------------------------------------------------------ #
-    logger.info("Step 2: Calculating performance metrics...")
+        preds_df = pd.DataFrame(predictions_resp.data)
+        preds_df["date"] = pd.to_datetime(preds_df["date"])
+        stock_ids = preds_df["stock_id"].unique().tolist()
 
-    # Compute actual forward returns
-    prices_df = prices_df.sort_values(["stock_id", "date"])
-    prices_df["actual_return"] = (
-        prices_df.groupby("stock_id")["close"]
-        .transform(lambda s: s.shift(-5) / s - 1)
-    )
+        # Get actual prices for the period (plus buffer for forward returns)
+        buffer_end = str(date.fromisoformat(end_date) + timedelta(days=10))
+        prices_df = db.get_prices(stock_ids, start_date, buffer_end)
 
-    # Merge predictions with actuals
-    merged = preds_df.merge(
-        prices_df[["date", "stock_id", "actual_return"]],
-        on=["date", "stock_id"],
-        how="inner",
-    )
-    merged = merged.dropna(subset=["actual_return"])
+        if prices_df.empty:
+            logger.warning("No price data found for prediction stocks")
+            sys.exit(0)
 
-    if merged.empty:
-        logger.warning("No matched prediction-actual pairs")
-        sys.exit(0)
+        # -------------------------------------------------------------- #
+        # 2. Calculate performance metrics
+        # -------------------------------------------------------------- #
+        logger.info("Step 2: Calculating performance metrics...")
 
-    # Information Coefficient (rank correlation per date)
-    from scipy.stats import spearmanr
+        # Compute actual forward returns
+        prices_df = prices_df.sort_values(["stock_id", "date"])
+        prices_df["actual_return"] = (
+            prices_df.groupby("stock_id")["close"]
+            .transform(lambda s: s.shift(-5) / s - 1)
+        )
 
-    ic_by_date = []
-    for dt, group in merged.groupby("date"):
-        if len(group) >= 5:
-            ic, _ = spearmanr(group["predicted_return"], group["actual_return"])
-            if not np.isnan(ic):
-                ic_by_date.append({"date": dt, "ic": ic})
+        # Merge predictions with actuals
+        merged = preds_df.merge(
+            prices_df[["date", "stock_id", "actual_return"]],
+            on=["date", "stock_id"],
+            how="inner",
+        )
+        merged = merged.dropna(subset=["actual_return"])
 
-    ic_df = pd.DataFrame(ic_by_date) if ic_by_date else pd.DataFrame(columns=["date", "ic"])
-    mean_ic = float(ic_df["ic"].mean()) if not ic_df.empty else 0.0
-    ic_ir = float(ic_df["ic"].mean() / ic_df["ic"].std()) if not ic_df.empty and ic_df["ic"].std() > 0 else 0.0
+        if merged.empty:
+            logger.warning("No matched prediction-actual pairs")
+            sys.exit(0)
 
-    # Simulate top-N portfolio returns (long top 5 by score each period)
-    portfolio_returns = []
-    for dt, group in merged.groupby("date"):
-        top_n = group.nlargest(5, "score")
-        avg_ret = top_n["actual_return"].mean()
-        portfolio_returns.append({"date": dt, "return": avg_ret})
+        # Information Coefficient (rank correlation per date)
+        from scipy.stats import spearmanr
 
-    port_df = pd.DataFrame(portfolio_returns)
-    port_metrics = _compute_metrics(pd.Series(port_df["return"].values)) if not port_df.empty else {}
+        ic_by_date = []
+        for dt, group in merged.groupby("date"):
+            if len(group) >= 5:
+                ic, _ = spearmanr(group["predicted_return"], group["actual_return"])
+                if not np.isnan(ic):
+                    ic_by_date.append({"date": dt, "ic": ic})
 
-    # ------------------------------------------------------------------ #
-    # 3. Compare vs benchmark (0050)
-    # ------------------------------------------------------------------ #
-    logger.info("Step 3: Comparing vs benchmark (0050)...")
-    benchmark_symbol = config.get("benchmark", {}).get("symbol", "0050")
+        ic_df = pd.DataFrame(ic_by_date) if ic_by_date else pd.DataFrame(columns=["date", "ic"])
+        mean_ic = float(ic_df["ic"].mean()) if not ic_df.empty else 0.0
+        ic_ir = float(ic_df["ic"].mean() / ic_df["ic"].std()) if not ic_df.empty and ic_df["ic"].std() > 0 else 0.0
 
-    bench_price = collector.fetch(benchmark_symbol, start_date, buffer_end)
-    bench_metrics = {}
-    if bench_price is not None and not bench_price.empty:
-        bench_returns = bench_price["close"].pct_change().dropna()
-        bench_metrics = _compute_metrics(bench_returns)
+        # Simulate top-N portfolio returns (long top 5 by score each period)
+        portfolio_returns = []
+        for dt, group in merged.groupby("date"):
+            top_n = group.nlargest(5, "score")
+            avg_ret = top_n["actual_return"].mean()
+            portfolio_returns.append({"date": dt, "return": avg_ret})
 
-    # ------------------------------------------------------------------ #
-    # 4. Generate summary
-    # ------------------------------------------------------------------ #
-    logger.info("Step 4: Generating summary...")
+        port_df = pd.DataFrame(portfolio_returns)
+        port_metrics = _compute_metrics(pd.Series(port_df["return"].values)) if not port_df.empty else {}
 
-    report = {
-        "period_start": start_date,
-        "period_end": end_date,
-        "prediction_count": len(preds_df),
-        "matched_count": len(merged),
-        "unique_stocks": len(stock_ids),
-        "mean_ic": round(mean_ic, 4),
-        "ic_ir": round(ic_ir, 4),
-        "portfolio_metrics": port_metrics,
-        "benchmark_metrics": bench_metrics,
-    }
+        # -------------------------------------------------------------- #
+        # 3. Compare vs benchmark (0050)
+        # -------------------------------------------------------------- #
+        logger.info("Step 3: Comparing vs benchmark (0050)...")
+        benchmark_symbol = config.get("benchmark", {}).get("symbol", "0050")
 
-    # Excess return
-    port_ret = port_metrics.get("total_return", 0.0)
-    bench_ret = bench_metrics.get("total_return", 0.0)
-    report["excess_return"] = round(port_ret - bench_ret, 4)
+        bench_price = collector.fetch(benchmark_symbol, start_date, buffer_end)
+        bench_metrics = {}
+        if bench_price is not None and not bench_price.empty:
+            bench_returns = bench_price["close"].pct_change().dropna()
+            bench_metrics = _compute_metrics(bench_returns)
 
-    logger.info("--- Report Summary ---")
-    logger.info("Period: {} ~ {}", start_date, end_date)
-    logger.info("Mean IC: {:.4f} | IC IR: {:.4f}", mean_ic, ic_ir)
-    logger.info("Portfolio return: {:.2%}", port_ret)
-    logger.info("Benchmark return: {:.2%}", bench_ret)
-    logger.info("Excess return: {:.2%}", report["excess_return"])
-    if port_metrics:
-        logger.info("Sharpe: {:.2f} | Max DD: {:.2%}",
-                     port_metrics.get("sharpe_ratio", 0), port_metrics.get("max_drawdown", 0))
+        # -------------------------------------------------------------- #
+        # 4. Generate summary
+        # -------------------------------------------------------------- #
+        logger.info("Step 4: Generating summary...")
 
-    # ------------------------------------------------------------------ #
-    # 5. Save to Supabase
-    # ------------------------------------------------------------------ #
-    if args.dry_run:
-        logger.info("[DRY RUN] Would save report to Supabase")
-    else:
-        logger.info("Step 5: Saving report to Supabase...")
-        db.save_backtest({
-            "run_date": str(date.today()),
-            "model_type": "monthly_report",
+        report = {
             "period_start": start_date,
             "period_end": end_date,
-            "metrics": report,
-            "config": config,
-        })
+            "prediction_count": len(preds_df),
+            "matched_count": len(merged),
+            "unique_stocks": len(stock_ids),
+            "mean_ic": round(mean_ic, 4),
+            "ic_ir": round(ic_ir, 4),
+            "portfolio_metrics": port_metrics,
+            "benchmark_metrics": bench_metrics,
+        }
 
-    logger.info("Monthly report completed successfully")
+        # Excess return
+        port_ret = port_metrics.get("total_return", 0.0)
+        bench_ret = bench_metrics.get("total_return", 0.0)
+        report["excess_return"] = round(port_ret - bench_ret, 4)
+
+        logger.info("--- Report Summary ---")
+        logger.info("Period: {} ~ {}", start_date, end_date)
+        logger.info("Mean IC: {:.4f} | IC IR: {:.4f}", mean_ic, ic_ir)
+        logger.info("Portfolio return: {:.2%}", port_ret)
+        logger.info("Benchmark return: {:.2%}", bench_ret)
+        logger.info("Excess return: {:.2%}", report["excess_return"])
+        if port_metrics:
+            logger.info("Sharpe: {:.2f} | Max DD: {:.2%}",
+                         port_metrics.get("sharpe_ratio", 0), port_metrics.get("max_drawdown", 0))
+
+        # -------------------------------------------------------------- #
+        # 5. Save to Supabase
+        # -------------------------------------------------------------- #
+        if args.dry_run:
+            logger.info("[DRY RUN] Would save report to Supabase")
+        else:
+            logger.info("Step 5: Saving report to Supabase...")
+            db.save_backtest({
+                "run_date": str(date.today()),
+                "model_type": "monthly_report",
+                "period_start": start_date,
+                "period_end": end_date,
+                "metrics": report,
+                "config": config,
+            })
+
+        logger.info("Monthly report completed successfully")
+
+        # Record pipeline success
+        if tracker and run_id:
+            tracker.finish_run(run_id, status="success", metrics=report)
+        if alert_mgr:
+            from monitoring.alerts import AlertLevel
+
+            sharpe = port_metrics.get("sharpe_ratio", 0)
+            max_dd = port_metrics.get("max_drawdown", 0)
+            alert_mgr.send_alert(
+                level=AlertLevel.INFO,
+                title="Monthly report completed",
+                message=(
+                    f"Period: {start_date}~{end_date}\n"
+                    f"Return: {port_ret:.2%} vs Benchmark: {bench_ret:.2%} "
+                    f"(Excess: {report['excess_return']:.2%})\n"
+                    f"Sharpe: {sharpe:.2f}, MaxDD: {max_dd:.2%}, IC: {mean_ic:.4f}"
+                ),
+            )
+
+    except Exception as exc:
+        logger.error("Monthly report pipeline failed: {}", exc)
+        if tracker and run_id:
+            tracker.finish_run(run_id, status="failed", error=str(exc))
+        if alert_mgr:
+            from monitoring.alerts import AlertLevel
+            alert_mgr.send_alert(
+                level=AlertLevel.CRITICAL,
+                title="Monthly report FAILED",
+                message=str(exc),
+            )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
