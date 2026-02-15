@@ -1,5 +1,5 @@
-.PHONY: help install install-dev setup test lint serve serve-api serve-frontend \
-       fetch update retrain backtest health check-db docker-up docker-down clean
+.PHONY: help install install-dev setup test lint dev serve serve-api serve-frontend \
+       fetch update retrain backtest pipeline pipeline-full health check-db docker-up docker-down clean
 
 PYTHON ?= $(shell command -v python3 2>/dev/null || echo python)
 PIP    ?= $(shell command -v pip3 2>/dev/null || echo pip)
@@ -53,6 +53,16 @@ retrain: ## Run weekly model retrain with Optuna tuning
 backtest: ## Run backtest for a specific stock (e.g. make backtest STOCK=2330)
 	$(PYTHON) -m scripts.daily_update --stock-id $(STOCK) --dry-run
 
+pipeline: ## Trigger incremental daily update via API
+	@curl -s -X POST http://localhost:8000/api/pipeline/daily-update \
+		-H 'Content-Type: application/json' \
+		-d '{"mode":"incremental"}' | $(PYTHON) -m json.tool
+
+pipeline-full: ## Trigger full daily update via API
+	@curl -s -X POST http://localhost:8000/api/pipeline/daily-update \
+		-H 'Content-Type: application/json' \
+		-d '{"mode":"full"}' | $(PYTHON) -m json.tool
+
 # ---------------------------------------------------------------
 # Testing
 # ---------------------------------------------------------------
@@ -83,9 +93,13 @@ lint-fix: ## Auto-fix lint issues
 # ---------------------------------------------------------------
 # Servers
 # ---------------------------------------------------------------
-serve: ## Start both API and frontend (requires two terminals — use docker-up instead)
-	@echo "Use 'make serve-api' and 'make serve-frontend' in separate terminals"
-	@echo "Or use 'make docker-up' for one-command startup"
+dev: ## Start frontend (auto-starts backend via Vite plugin)
+	cd frontend && npm run dev
+
+serve: ## Start both API and frontend in parallel
+	@trap 'kill 0' EXIT; \
+	$(PYTHON) -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000 & \
+	cd frontend && npm run dev
 
 serve-api: ## Start FastAPI backend on port 8000
 	$(PYTHON) -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000

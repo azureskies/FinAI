@@ -115,6 +115,12 @@ class BacktestEngine:
             # Rebalance on designated dates
             if date in rebalance_dates:
                 date_preds = predictions[predictions["date"] == date]
+                # If no exact match, use the closest available predictions
+                if date_preds.empty:
+                    nearest_date = predictions["date"].iloc[
+                        (predictions["date"] - date).abs().argsort().iloc[0]
+                    ]
+                    date_preds = predictions[predictions["date"] == nearest_date]
                 if not date_preds.empty:
                     # Execute at T+1 open price to avoid lookahead bias
                     next_date = all_dates[i + 1] if i + 1 < len(all_dates) else None

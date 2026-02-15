@@ -36,6 +36,7 @@ export interface TopPick {
 
 export interface ScoredStock {
 	stock_id: string;
+	stock_name: string | null;
 	composite_score: number | null;
 	momentum_score: number | null;
 	trend_score: number | null;
@@ -57,6 +58,7 @@ export interface TopPicksResponse {
 
 export interface StockScoreResponse {
 	stock_id: string;
+	stock_name: string | null;
 	composite_score: number | null;
 	momentum_score: number | null;
 	trend_score: number | null;
@@ -220,4 +222,100 @@ export function listModels(modelType?: string) {
 export function getActiveModels(modelType?: string) {
 	const qs = modelType ? `?model_type=${modelType}` : '';
 	return request<ModelListResponse>(`/models/active${qs}`);
+}
+
+// ------------------------------------------------------------------ //
+//  Pipeline
+// ------------------------------------------------------------------ //
+
+export interface PipelineRunRequest {
+	mode?: 'full' | 'incremental';
+	stock_ids?: string[];
+}
+
+export interface PipelineRunResponse {
+	status: string;
+	message: string;
+	task_id: string;
+}
+
+export interface PipelineTaskStatus {
+	task_id: string;
+	status: string;
+	started_at: string | null;
+	finished_at: string | null;
+	progress: string | null;
+	error: string | null;
+}
+
+export interface PipelineStatusResponse {
+	tasks: PipelineTaskStatus[];
+}
+
+export function runPipeline(req: PipelineRunRequest) {
+	return request<PipelineRunResponse>('/pipeline/daily-update', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(req)
+	});
+}
+
+export function getPipelineStatus() {
+	return request<PipelineStatusResponse>('/pipeline/status');
+}
+
+// ------------------------------------------------------------------ //
+//  Backtest — trigger
+// ------------------------------------------------------------------ //
+
+export interface BacktestRunRequest {
+	model_type?: string;
+	mode?: 'run' | 'walk_forward';
+	period_start?: string;
+	period_end?: string;
+	initial_capital?: number;
+}
+
+export interface BacktestRunResponse {
+	status: string;
+	message: string;
+}
+
+export function runBacktest(req: BacktestRunRequest) {
+	return request<BacktestRunResponse>('/backtest/run', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(req)
+	});
+}
+
+// ------------------------------------------------------------------ //
+//  Health
+// ------------------------------------------------------------------ //
+
+export function checkHealth() {
+	return request<{ status: string }>('/health');
+}
+
+// ------------------------------------------------------------------ //
+//  Monitoring
+// ------------------------------------------------------------------ //
+
+export interface PipelineRunItem {
+	id: string;
+	pipeline_name: string;
+	start_time: string | null;
+	end_time: string | null;
+	status: string;
+	metrics: Record<string, unknown> | null;
+	error: string | null;
+}
+
+export interface PipelineRunsResponse {
+	runs: PipelineRunItem[];
+	message: string | null;
+}
+
+export function getPipelineRuns(limit = 10) {
+	return request<PipelineRunsResponse>(`/monitoring/pipeline-runs?limit=${limit}`);
 }
