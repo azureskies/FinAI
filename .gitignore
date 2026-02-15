@@ -44,6 +44,10 @@ htmlcov/
 .coverage
 
 # Node (SvelteKit)
+node_modules/
 web/node_modules/
 web/.svelte-kit/
 web/build/
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
