@@ -1,0 +1,51 @@
+# Backtest Configuration
+
+transaction_costs:
+  commission_rate: 0.001425     # 0.1425% broker commission
+  tax_rate: 0.003               # 0.3% securities transaction tax (sell only)
+  round_trip: 0.006             # ~0.6% total round-trip cost
+  min_commission: 20            # TWD 20 minimum commission
+
+slippage:
+  large_cap: 0.001              # 0.1% for large cap stocks
+  mid_cap: 0.002                # 0.2% for mid cap
+  small_cap: 0.003              # 0.3% for small cap
+
+portfolio:
+  method: "equal_weight"        # equal_weight | inverse_volatility
+  max_positions: 20             # Maximum number of holdings
+  min_position_value: 50000     # Minimum TWD 50K per position
+  max_single_weight: 0.10       # Max 10% in single stock
+  rebalance_frequency: "monthly"
+
+success_criteria:
+  phase_1:                      # Exploration phase
+    min_sharpe: 1.1
+    max_p_value: 0.10
+    max_drawdown: -0.25
+    description: "Loose criteria for signal discovery"
+
+  phase_2:                      # Rigorous validation
+    min_sharpe: 1.2
+    max_p_value: 0.05
+    max_drawdown: -0.20
+    min_information_ratio: 0.5
+    description: "Strict criteria for production readiness"
+
+  stop_loss:
+    sharpe_below: 0.8           # Stop project if Sharpe < 0.8
+    description: "Project kill switch"
+
+benchmark:
+  symbol: "0050"                # Taiwan 50 ETF
+  name: "元大台灣50"
+
+metrics:
+  - sharpe_ratio
+  - sortino_ratio
+  - calmar_ratio
+  - max_drawdown
+  - win_rate
+  - information_coefficient
+  - annualized_return
+  - annualized_volatility

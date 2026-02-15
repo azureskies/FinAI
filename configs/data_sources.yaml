@@ -1,0 +1,42 @@
+# Data Sources Configuration
+# Priority order: higher priority sources are tried first
+
+price_sources:
+  - name: yfinance
+    enabled: true
+    priority: 1
+    suffix: ".TW"        # Append to stock_id for TWSE
+    otc_suffix: ".TWO"   # Append to stock_id for OTC
+    rate_limit: 2.0       # seconds between requests
+
+  - name: finmind
+    enabled: true
+    priority: 2
+    base_url: "https://api.finmindtrade.com/api/v4"
+    token: "${FINMIND_TOKEN}"  # Optional, increases rate limit
+
+fundamental_sources:
+  - name: mops
+    enabled: true
+    priority: 1
+    base_url: "https://mops.twse.com.tw"
+    description: "公開資訊觀測站 (MOPS)"
+
+universe:
+  # Stock pool filtering criteria
+  min_market_cap: 10_000_000_000   # 10 billion TWD
+  min_avg_volume: 1000              # 1000 lots (= 1,000,000 shares)
+  min_listing_years: 2
+  exclude_categories:
+    - "全額交割股"
+    - "處置股"
+    - "管理股票"
+
+data_quality:
+  max_missing_rate: 0.05       # Max 5% missing data allowed
+  price_change_limit: 0.11     # Flag if daily change > 11% (beyond limit up/down)
+  volume_zero_max_days: 5      # Flag if zero volume for > 5 consecutive days
+
+schedule:
+  daily_update_time: "18:00"   # UTC+8, after market close
+  timezone: "Asia/Taipei"

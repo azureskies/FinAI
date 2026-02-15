@@ -1,0 +1,50 @@
+name: Daily Data Update
+
+on:
+  schedule:
+    # 10:00 UTC = 18:00 UTC+8, Monday to Friday
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      stock_id:
+        description: "Single stock ID to update (optional)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run mode"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+jobs:
+  daily-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily update
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.stock_id }}" ]; then
+            ARGS="$ARGS --stock-id ${{ github.event.inputs.stock_id }}"
+          fi
+          python -m scripts.daily_update $ARGS

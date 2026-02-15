@@ -1,0 +1,59 @@
+# Model Parameters Configuration
+
+prediction:
+  target: "forward_return_5d"   # Predict 5-day forward return
+  target_days: 5
+
+models:
+  ridge:
+    alpha: 1.0
+    description: "Linear baseline model"
+
+  random_forest:
+    n_estimators: 200
+    max_depth: 10
+    min_samples_leaf: 20
+    max_features: "sqrt"
+    random_state: 42
+    n_jobs: -1
+    description: "Primary model 1 - feature importance"
+
+  xgboost:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 10
+    random_state: 42
+    description: "Primary model 2 - best performance"
+
+  ensemble:
+    method: "weighted_average"   # weighted_average | stacking
+    weights:
+      random_forest: 0.4
+      xgboost: 0.6
+    description: "Final model - reduces single model risk"
+
+optuna:
+  n_trials: 50
+  timeout: 3600              # 1 hour max
+  direction: "maximize"       # maximize IC (Information Coefficient)
+
+training:
+  walk_forward:
+    train_window_days: 756     # ~3 years of trading days
+    test_window_days: 63       # ~1 quarter
+    step_days: 63              # retrain every quarter
+
+  time_split:
+    train_start: "2018-01-01"
+    train_end: "2021-12-31"
+    val_start: "2022-01-01"
+    val_end: "2022-12-31"
+    test_start: "2023-01-01"
+    test_end: "2024-12-31"
+
+feature_selection:
+  correlation_threshold: 0.95   # Remove features with corr > 0.95
+  min_importance: 0.001         # Remove features with importance < 0.1%

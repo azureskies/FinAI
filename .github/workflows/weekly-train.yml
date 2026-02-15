@@ -1,0 +1,50 @@
+name: Weekly Model Retrain
+
+on:
+  schedule:
+    # 18:00 UTC Sunday = 02:00 UTC+8 Monday
+    - cron: "0 18 * * 0"
+  workflow_dispatch:
+    inputs:
+      model_type:
+        description: "Specific model type to train (optional)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run mode"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+jobs:
+  weekly-retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weekly retrain
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.model_type }}" ]; then
+            ARGS="$ARGS --model-type ${{ github.event.inputs.model_type }}"
+          fi
+          python -m scripts.weekly_retrain $ARGS

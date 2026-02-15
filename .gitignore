@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Data
+*.pkl
+*.parquet
+*.csv
+!configs/*.yaml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model artifacts
+models/artifacts/
+
+# Coverage
+htmlcov/
+.coverage
+
+# Node (SvelteKit)
+web/node_modules/
+web/.svelte-kit/
+web/build/
